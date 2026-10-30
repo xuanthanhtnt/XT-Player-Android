@@ -12,10 +12,16 @@ plugins {
 fun buildKey(name: String): String = (System.getenv(name) ?: project.findProperty(name) as String? ?: "")
     .replace("\\", "\\\\").replace("\"", "\\\"")
 
-/** Release signing: keystore.properties locally, or ANDROID_KEYSTORE_* environment variables on CI. */
+/**
+ * Release signing: keystore.properties (in the project, or ~/.xtplayer-signing/ where the release key lives),
+ * or ANDROID_KEYSTORE_* environment variables on CI. The key is PKCS12 (made with openssl, no JDK needed).
+ */
 val signingProps = Properties().apply {
-    val file = rootProject.file("keystore.properties")
-    if (file.exists()) file.inputStream().use { load(it) }
+    val file = listOf(
+        rootProject.file("keystore.properties"),
+        File(System.getProperty("user.home"), ".xtplayer-signing/keystore.properties"),
+    ).firstOrNull { it.exists() }
+    file?.inputStream()?.use { load(it) }
 }
 
 fun signingValue(prop: String, env: String): String? =
@@ -44,6 +50,7 @@ android {
         if (storeFilePath != null && file(storeFilePath).exists()) {
             create("release") {
                 storeFile = file(storeFilePath)
+                storeType = "pkcs12"
                 storePassword = signingValue("storePassword", "ANDROID_KEYSTORE_PASSWORD")
                 keyAlias = signingValue("keyAlias", "ANDROID_KEY_ALIAS")
                 keyPassword = signingValue("keyPassword", "ANDROID_KEY_PASSWORD")

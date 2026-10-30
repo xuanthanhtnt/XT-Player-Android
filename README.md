@@ -58,7 +58,7 @@ CI có thể nhúng sẵn khoá qua GitHub secrets `TMDB_API_KEY`, `OPENSUBTITLE
 
 Mọi bản build chạy trên **GitHub Actions** (`.github/workflows/build.yml`): chạy unit test, build APK release, đính kèm vào Artifacts; khi đẩy tag `v*` thì tự tạo Release kèm APK.
 
-Ký APK: đặt các secret `ANDROID_KEYSTORE_BASE64` (`base64 -i release.keystore`), `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`. Không có thì APK được ký bằng khoá debug tạm của máy CI, và bản sau không cài đè được lên bản trước.
+Ký APK: khoá phát hành (PKCS12) nằm ngoài repo, CI đọc từ các secret `ANDROID_KEYSTORE_BASE64` (`base64 -i release.keystore`), `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`. Build trên máy tự tìm `keystore.properties` trong dự án hoặc ở `~/.xtplayer-signing/`. **Giữ bản sao khoá cẩn thận**: mất khoá thì bản sau không cài đè được lên bản đã cài.
 
 Build trên máy (cần JDK 17 và Android SDK):
 
