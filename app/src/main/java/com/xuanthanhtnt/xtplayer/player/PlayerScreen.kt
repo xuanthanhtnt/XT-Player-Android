@@ -144,6 +144,7 @@ fun PlayerScreen(
     onClose: () -> Unit,
     onPip: (() -> Unit)? = null,
     castBridge: CastBridge? = null,
+    onPlayerView: (PlayerView) -> Unit = {},
 ) {
     val engine = controller.engine
     val settings = AppGraph.settings
@@ -293,6 +294,7 @@ fun PlayerScreen(
                     setKeepContentOnPlayerReset(true)
                     isFocusable = false
                     isFocusableInTouchMode = false
+                    onPlayerView(this)
                 }
             },
             update = { view ->
@@ -354,7 +356,14 @@ fun PlayerScreen(
                     onClose = onClose,
                     onPanel = { panel = if (panel == null) it else null },
                     onSkip = ::skip,
-                    onPip = onPip,
+                    onPip = onPip?.let { enter ->
+                        {
+                            // Shrink from a clean picture: the controls go away before the window does.
+                            controlsVisible = false
+                            panel = null
+                            enter()
+                        }
+                    },
                     onCast = castBridge?.let { { showCast = true } },
                 )
             }
@@ -1162,10 +1171,49 @@ private fun OnlineSubtitles() {
 }
 
 private fun androidx.compose.foundation.lazy.LazyListScope.videoPanel(engine: PlayerEngine) {
+    sectionTitle("Giải mã")
+    item { DecoderSwitch(engine) }
     sectionTitle("Khung hình")
     item { FitChoices(engine) }
     sectionTitle("Tốc độ phát")
     item { SpeedChoices(engine) }
+}
+
+/** Hardware (the device's video decoder, default) or Android's software decoder — applied by reloading at the same spot. */
+@Composable
+private fun DecoderSwitch(engine: PlayerEngine) {
+    val controller = LocalPlayerController.current
+    val hardware by AppGraph.settings.hardwareDecoding.collect()
+    val decoder by engine.videoDecoder.collectAsState()
+    Column {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .clickable {
+                    AppGraph.settings.hardwareDecoding.value = !hardware
+                    controller?.retry()
+                }
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("Giải mã phần cứng", color = Color.White, style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    if (decoder.isEmpty()) "—" else decoder + if (isSoftwareDecoder(decoder)) " · phần mềm" else " · phần cứng",
+                    color = XtColors.secondaryText,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            Switch(checked = hardware, onCheckedChange = null)
+        }
+        Text(
+            "Bật: nhanh, mát máy, giữ HDR / Dolby Vision. Tắt khi một tệp bị sọc / xanh lá / giật hình trên máy này.",
+            color = XtColors.secondaryText,
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(horizontal = 12.dp),
+        )
+    }
 }
 
 @Composable
@@ -1214,7 +1262,7 @@ private fun InfoPanelContent() {
         add("Khung hình" to if (video.fps > 0) String.format(Locale.US, "%.3f fps", video.fps) else "—")
         add("Dải động" to video.dynamicRange)
         add("Bitrate" to ByteFormat.bitrate(video.bitrate.toDouble()))
-        add("Bộ giải mã" to videoDecoder.ifEmpty { "—" })
+        add("Bộ giải mã" to if (videoDecoder.isEmpty()) "—" else videoDecoder + if (isSoftwareDecoder(videoDecoder)) " (phần mềm)" else " (phần cứng)")
         add("Khung hình rớt" to "$dropped")
         add("Âm thanh" to "")
         add("Codec" to listOf(audio.codec, PlayerEngine.channelLayout(audio.channels)).filter { it.isNotEmpty() }.joinToString(" ").ifEmpty { "—" })

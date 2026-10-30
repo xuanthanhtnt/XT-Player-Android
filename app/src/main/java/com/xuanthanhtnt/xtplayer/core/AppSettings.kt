@@ -57,6 +57,8 @@ class AppSettings(context: Context) {
     val skipBackSeconds = int("player.skipBack", 10)
     val skipForwardSeconds = int("player.skipForward", 30)
     val tunneling = bool("player.tunneling", false)
+    /** Video decoders: the device's hardware first (software when it fails), or Android's software decoders only. */
+    val hardwareDecoding = bool("player.hardwareDecoding", true)
     val subtitleLanguages = string("subtitles.languages", "vi,vie,en,eng")
     val audioLanguages = string("audio.languages", "")
     val subtitleScale = float("subtitles.scale", 1f)

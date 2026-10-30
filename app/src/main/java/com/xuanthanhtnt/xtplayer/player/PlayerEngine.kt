@@ -20,6 +20,7 @@ import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.analytics.AnalyticsListener
+import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.audio.AudioCapabilities
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
@@ -92,12 +93,33 @@ data class AudioSignal(
     val language: String = "",
 )
 
+/**
+ * Video decoders in the order the user wants: hardware first (Settings ▸ Giải mã phần cứng, the default), or only
+ * Android's software decoders (c2.android.*) for files a device's hardware decoder shows wrongly. Read at every
+ * decoder start, so switching takes effect on the next load of the file.
+ */
+private val codecSelector = MediaCodecSelector { mimeType, secure, tunneling ->
+    val all = MediaCodecSelector.DEFAULT.getDecoderInfos(mimeType, secure, tunneling)
+    when {
+        !mimeType.startsWith("video/") -> all
+        AppGraph.settings.hardwareDecoding.value -> all.sortedBy { if (it.hardwareAccelerated) 0 else 1 }
+        else -> all.filter { it.softwareOnly }.ifEmpty { all }
+    }
+}
+
+/** Whether a decoder name is one of Android's / FFmpeg's software decoders. */
+fun isSoftwareDecoder(name: String): Boolean =
+    name.startsWith("c2.android.") || name.startsWith("OMX.google.") || name.contains("ffmpeg", ignoreCase = true)
+
 /** Bitstream when the sink accepts it, or force PCM (Settings ▸ Âm thanh). */
 private class XtRenderersFactory(context: Context, private val passthrough: Boolean) : DefaultRenderersFactory(context) {
     init {
         // Platform decoders first; FFmpeg (TrueHD, DTS, …) when the device has none.
         setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
         setEnableDecoderFallback(true)
+        // 24-bit / high-sample-rate PCM (FLAC, decoded TrueHD / DTS-HD MA) stays in float instead of being cut to 16 bit.
+        setEnableAudioFloatOutput(true)
+        setMediaCodecSelector(codecSelector)
     }
 
     override fun buildAudioSink(context: Context, enableFloatOutput: Boolean, enableAudioTrackPlaybackParams: Boolean): AudioSink {

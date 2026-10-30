@@ -38,13 +38,22 @@ class PlayerActivity : ComponentActivity() {
     private val castBridgeState = mutableStateOf<CastBridge?>(null)
     private var isTv = false
     private var switchedMode = false
+    /** The video view, for the picture-in-picture animation's source rectangle. */
+    private var playerView: androidx.media3.ui.PlayerView? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         isTv = (getSystemService(UI_MODE_SERVICE) as UiModeManager).currentModeType == Configuration.UI_MODE_TYPE_TELEVISION ||
             packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        addOnPictureInPictureModeChangedListener { info -> inPip.value = info.isInPictureInPictureMode }
+        addOnPictureInPictureModeChangedListener { info ->
+            inPip.value = info.isInPictureInPictureMode
+            // Leaving PiP while stopped means the window was closed (✕ or swiped away), not expanded: stop playing.
+            if (!info.isInPictureInPictureMode && !lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)) {
+                engine?.pause()
+                close()
+            }
+        }
         WindowCompat.setDecorFitsSystemWindows(window, false)
         WindowInsetsControllerCompat(window, window.decorView).apply {
             hide(WindowInsetsCompat.Type.systemBars())
@@ -119,7 +128,7 @@ class PlayerActivity : ComponentActivity() {
     private fun start(session: PlaybackSession) {
         val engine = PlayerEngine(this).also { engine = it }
         mediaSession = runCatching { MediaSession.Builder(this, engine.player).setId("xtplayer-${System.nanoTime()}").build() }.getOrNull()
-        val controller = PlayerController(engine, session, lifecycleScope, ::matchFrameRate).also { controller = it }
+        val controller = PlayerController(engine, session, lifecycleScope, ::matchContent).also { controller = it }
         setContent {
             XtTheme(isTv = isTv, isWide = true) {
                 CompositionLocalProvider(LocalPlayerController provides controller) {
@@ -127,6 +136,10 @@ class PlayerActivity : ComponentActivity() {
                         controller = controller, isTv = isTv, inPip = inPip.value, onClose = ::close,
                         onPip = if (canPip) ({ enterPip(onlyWhenPlaying = false) }) else null,
                         castBridge = castBridgeState.value,
+                        onPlayerView = { view ->
+                            playerView = view
+                            view.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> updatePipParams() }
+                        },
                     )
                 }
             }
@@ -148,7 +161,7 @@ class PlayerActivity : ComponentActivity() {
         super.onStop()
         controller?.saveProgress()
         // Keep playing in picture-in-picture, pause otherwise (Infuse pauses in the background).
-        if (!inPip.value) engine?.pause()
+        if (!isInPictureInPictureMode) engine?.pause()
     }
 
     override fun onUserLeaveHint() {
@@ -167,9 +180,9 @@ class PlayerActivity : ComponentActivity() {
     }
 
     /**
-     * The video's shape (Android accepts 1:2.39 … 2.39:1); on Android 12+ the window also shrinks into
-     * picture-in-picture by itself when leaving the app while playing (the smooth system animation), and is not
-     * cross-faded while resizing (a video, not a document).
+     * The video's shape (Android accepts 1:2.39 … 2.39:1) and where the picture is on screen, so the window shrinks
+     * from the video itself; on Android 12+ it also goes into picture-in-picture by itself when leaving the app while
+     * playing. Seamless resizing stays on: turning it off is for non-video content and shows the app icon on black.
      */
     private fun pipParams(): PictureInPictureParams {
         val video = engine?.video?.value
@@ -180,11 +193,18 @@ class PlayerActivity : ComponentActivity() {
             Rational(16, 9)
         }
         return PictureInPictureParams.Builder().setAspectRatio(ratio).apply {
+            videoBounds()?.let { setSourceRectHint(it) }
             if (Build.VERSION.SDK_INT >= 31) {
                 setAutoEnterEnabled(canPip && engine?.state?.value == PlaybackState.Playing)
-                setSeamlessResizeEnabled(false)
             }
         }.build()
+    }
+
+    /** The visible picture (PlayerView's content frame, letterboxing excluded) in window coordinates. */
+    private fun videoBounds(): android.graphics.Rect? {
+        val frame = playerView?.findViewById<android.view.View>(androidx.media3.ui.R.id.exo_content_frame) ?: return null
+        val rect = android.graphics.Rect()
+        return if (frame.getGlobalVisibleRect(rect) && rect.width() > 0 && rect.height() > 0) rect else null
     }
 
     private fun updatePipParams() {
@@ -200,30 +220,42 @@ class PlayerActivity : ComponentActivity() {
         super.onDestroy()
     }
 
-    /** Settings ▸ Khớp tần số quét = "always": switch the TV to a refresh rate that is a multiple of the video's. */
-    private fun matchFrameRate(fps: Float) {
+    /**
+     * Settings ▸ Khớp tần số quét = "always" (Match Content): the TV switches to the video's frame rate, and to 4K
+     * output for 4K video when the box runs its menus in 1080p.
+     */
+    private fun matchContent(video: VideoSignal) {
         if (AppGraph.settings.frameRateMatching.value != "always") return
-        if (DisplayModeMatcher.apply(this, fps)) switchedMode = true
+        if (DisplayModeMatcher.apply(this, video.fps, video.width, video.height)) switchedMode = true
     }
 }
 
-/** Match Content for Android TV: picks a display mode of the same resolution whose refresh rate fits the video. */
+/** Match Content for Android TV: a display mode whose refresh rate (and, for 4K video, resolution) fits the video. */
 object DisplayModeMatcher {
     @Suppress("DEPRECATION")
     private fun display(activity: Activity): Display? =
         if (Build.VERSION.SDK_INT >= 30) activity.display else activity.windowManager.defaultDisplay
 
-    fun apply(activity: Activity, fps: Float): Boolean {
+    fun apply(activity: Activity, fps: Float, width: Int, height: Int): Boolean {
         val display = display(activity) ?: return false
         val current = display.mode
-        val candidates = display.supportedModes.filter {
-            it.physicalWidth == current.physicalWidth && it.physicalHeight == current.physicalHeight
+        val modes = display.supportedModes.toList()
+        // Resolution: keep the current one, unless the video is 4K and the box outputs less while a 4K mode exists.
+        val wantsUhd = maxOf(width, height) >= 3000 && maxOf(current.physicalWidth, current.physicalHeight) < 3000
+        val uhd = modes.filter { maxOf(it.physicalWidth, it.physicalHeight) >= 3000 }
+        val sized = if (wantsUhd && uhd.isNotEmpty()) {
+            val size = uhd.maxBy { it.physicalWidth * it.physicalHeight }
+            modes.filter { it.physicalWidth == size.physicalWidth && it.physicalHeight == size.physicalHeight }
+        } else {
+            modes.filter { it.physicalWidth == current.physicalWidth && it.physicalHeight == current.physicalHeight }
         }
-        // The lowest refresh rate that is a whole multiple of the frame rate (23.976 → 23.976 / 47.95 / 119.88 Hz).
-        val best = candidates.mapNotNull { mode ->
+        // Refresh rate: the lowest whole multiple of the frame rate (23.976 → 23.976 / 47.95 / 119.88 Hz);
+        // without a known frame rate (or a match), the current rate at the chosen size.
+        val byRate = if (fps > 0) sized.mapNotNull { mode ->
             val multiple = (mode.refreshRate / fps).roundToInt()
             if (multiple >= 1 && abs(mode.refreshRate - multiple * fps) < 0.05f * multiple) mode to multiple else null
-        }.minByOrNull { it.second }?.first ?: return false
+        }.minByOrNull { it.second }?.first else null
+        val best = byRate ?: sized.minByOrNull { abs(it.refreshRate - current.refreshRate) } ?: return false
         if (best.modeId == current.modeId) return false
         val attributes = activity.window.attributes
         attributes.preferredDisplayModeId = best.modeId

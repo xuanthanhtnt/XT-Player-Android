@@ -20,7 +20,7 @@ class PlayerController(
     val engine: PlayerEngine,
     session: PlaybackSession,
     private val scope: CoroutineScope,
-    private val onFrameRate: (Float) -> Unit,
+    private val onVideo: (VideoSignal) -> Unit,
 ) {
     private val items = session.items.toMutableList()
     private val indexState = MutableStateFlow(session.safeStart)
@@ -55,7 +55,7 @@ class PlayerController(
         scope.launch { engine.state.collect { onState(it) } }
         scope.launch {
             engine.video.collect { video ->
-                if (video.fps > 0) onFrameRate(video.fps)
+                if (video.fps > 0 || video.width > 0) onVideo(video)
                 maybeLearn()
             }
         }
@@ -116,6 +116,7 @@ class PlayerController(
         engine.play()
     }
 
+    /** Loads the current item again at the same position (after an error, or a decoder switch). */
     fun retry() {
         val item = items[indexState.value].copy(startAt = engine.position.value.takeIf { it > 0 })
         items[indexState.value] = item

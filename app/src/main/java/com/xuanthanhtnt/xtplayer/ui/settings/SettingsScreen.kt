@@ -68,10 +68,16 @@ fun SettingsScreen() {
         item { PageTitle("Cài đặt", inset = false) }
 
         section("Phát lại", "Áp dụng cho lần phát tiếp theo.") {
+            PrefSwitch(
+                "Giải mã phần cứng", settings.hardwareDecoding,
+                "Bật (khuyên dùng): dùng chip giải mã của máy — mượt, mát, giữ HDR / Dolby Vision. Tắt khi một tệp bị sọc, " +
+                    "xanh lá hay giật hình: dùng bộ giải mã phần mềm của Android. Đổi nhanh trong trình phát ▸ ⚙︎ ▸ Video.",
+            )
             ChoiceRow(
                 "Khớp tần số quét", settings.frameRateMatching,
                 listOf("off" to "Tắt", "seamless" to "Khi chuyển mượt", "always" to "Luôn đổi (Match Content)"),
-                detail = "Android TV: đổi tần số quét của TV theo video (23.976 / 24 / 25 / 50 / 60 Hz).",
+                detail = "Android TV: đổi tần số quét của TV theo video (23.976 / 24 / 25 / 50 / 60 Hz) — hết giật hình khi máy quay ngang; " +
+                    "Match Content còn chuyển TV sang 4K cho phim 4K khi hộp đang xuất 1080p.",
             )
             ChoiceRow("Bộ đệm RAM", settings.cacheMegabytes, listOf(100, 200, 300, 500, 800, 1200).map { it to "$it MB" })
             PrefSwitch("Tự phát tập tiếp theo", settings.autoplayNext)
