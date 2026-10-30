@@ -439,7 +439,7 @@ class TraktService {
         return Json.parseToJsonElement(text).jsonObject
     }
 
-    private suspend fun raw(path: String, method: String, body: JsonObject?, authorized: Boolean): Pair<Int, String> {
+    private suspend fun raw(path: String, verb: String, body: JsonObject?, authorized: Boolean): Pair<Int, String> {
         val client = AppSettings.traktClient ?: throw TraktError("Nhập Client ID của ứng dụng Trakt trước.")
         val bearer = if (authorized) validAccessToken() else null
         return withContext(Dispatchers.IO) {
@@ -450,8 +450,8 @@ class TraktService {
                 .header("trakt-api-key", client.first)
                 .apply {
                     if (bearer != null) header("Authorization", "Bearer $bearer")
-                    if (body != null) method(method, body.toString().toRequestBody("application/json".toMediaType()))
-                    else method(method, null)
+                    if (body != null) method(verb, body.toString().toRequestBody("application/json".toMediaType()))
+                    else method(verb, null)
                 }
                 .build()
             Http.client.newCall(request).execute().use { response -> response.code to (response.body?.string().orEmpty()) }

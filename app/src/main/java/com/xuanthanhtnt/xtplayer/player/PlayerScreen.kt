@@ -267,7 +267,7 @@ fun PlayerScreen(controller: PlayerController, isTv: Boolean, inPip: Boolean, on
                 }
             },
             update = { view ->
-                view.resizeMode = fit.resizeMode
+                view.setResizeMode(fit.resizeMode)
                 styleSubtitles(view.subtitleView, subtitleScale, subtitlePosition, subtitleBackground)
             },
             modifier = Modifier.fillMaxSize(),

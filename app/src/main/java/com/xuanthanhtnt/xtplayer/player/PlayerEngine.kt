@@ -155,6 +155,58 @@ class PlayerEngine(context: Context) {
     val networkSpeed: StateFlow<Double> = networkFlow
     val droppedFrames: StateFlow<Int> = droppedFlow
 
+    private val listener = object : Player.Listener {
+        override fun onPlaybackStateChanged(playbackState: Int) {
+            refreshPosition()
+            updateState()
+        }
+
+        override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) = updateState()
+
+        override fun onPlayerError(error: PlaybackException) = updateState()
+
+        override fun onPlaybackParametersChanged(playbackParameters: PlaybackParameters) {
+            speedFlow.value = playbackParameters.speed
+        }
+
+        override fun onTracksChanged(tracks: Tracks) {
+            rebuildTracks(tracks)
+            player.videoFormat?.let { videoFlow.value = videoSignal(it) }
+            player.audioFormat?.let { audioFlow.value = audioSignal(it) }
+        }
+    }
+
+    private val analytics = object : AnalyticsListener {
+        override fun onVideoDecoderInitialized(
+            eventTime: AnalyticsListener.EventTime, decoderName: String, initializedTimestampMs: Long, initializationDurationMs: Long,
+        ) {
+            decoderFlow.value = decoderName
+        }
+
+        override fun onAudioDecoderInitialized(
+            eventTime: AnalyticsListener.EventTime, decoderName: String, initializedTimestampMs: Long, initializationDurationMs: Long,
+        ) {
+            audioDecoderFlow.value = decoderName
+        }
+
+        override fun onVideoInputFormatChanged(eventTime: AnalyticsListener.EventTime, format: Format, decoderReuseEvaluation: DecoderReuseEvaluation?) {
+            videoFlow.value = videoSignal(format)
+        }
+
+        override fun onAudioInputFormatChanged(eventTime: AnalyticsListener.EventTime, format: Format, decoderReuseEvaluation: DecoderReuseEvaluation?) {
+            audioFlow.value = audioSignal(format)
+        }
+
+        override fun onAudioTrackInitialized(eventTime: AnalyticsListener.EventTime, audioTrackConfig: AudioSink.AudioTrackConfig) {
+            bitstreamFlow.value = audioTrackConfig.encoding in BITSTREAM_ENCODINGS
+            if (bitstreamFlow.value) audioDecoderFlow.value = "Bitstream (HDMI)"
+        }
+
+        override fun onDroppedVideoFrames(eventTime: AnalyticsListener.EventTime, droppedFrames: Int, elapsedMs: Long) {
+            droppedFlow.value += droppedFrames
+        }
+    }
+
     init {
         trackSelector.setParameters(
             trackSelector.buildUponParameters()
@@ -309,58 +361,6 @@ class PlayerEngine(context: Context) {
             else -> PlaybackState.Paused
         }
         bufferingFlow.value = player.playbackState == Player.STATE_BUFFERING
-    }
-
-    private val listener = object : Player.Listener {
-        override fun onPlaybackStateChanged(playbackState: Int) {
-            refreshPosition()
-            updateState()
-        }
-
-        override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) = updateState()
-
-        override fun onPlayerError(error: PlaybackException) = updateState()
-
-        override fun onPlaybackParametersChanged(playbackParameters: PlaybackParameters) {
-            speedFlow.value = playbackParameters.speed
-        }
-
-        override fun onTracksChanged(tracks: Tracks) {
-            rebuildTracks(tracks)
-            player.videoFormat?.let { videoFlow.value = videoSignal(it) }
-            player.audioFormat?.let { audioFlow.value = audioSignal(it) }
-        }
-    }
-
-    private val analytics = object : AnalyticsListener {
-        override fun onVideoDecoderInitialized(
-            eventTime: AnalyticsListener.EventTime, decoderName: String, initializedTimestampMs: Long, initializationDurationMs: Long,
-        ) {
-            decoderFlow.value = decoderName
-        }
-
-        override fun onAudioDecoderInitialized(
-            eventTime: AnalyticsListener.EventTime, decoderName: String, initializedTimestampMs: Long, initializationDurationMs: Long,
-        ) {
-            audioDecoderFlow.value = decoderName
-        }
-
-        override fun onVideoInputFormatChanged(eventTime: AnalyticsListener.EventTime, format: Format, decoderReuseEvaluation: DecoderReuseEvaluation?) {
-            videoFlow.value = videoSignal(format)
-        }
-
-        override fun onAudioInputFormatChanged(eventTime: AnalyticsListener.EventTime, format: Format, decoderReuseEvaluation: DecoderReuseEvaluation?) {
-            audioFlow.value = audioSignal(format)
-        }
-
-        override fun onAudioTrackInitialized(eventTime: AnalyticsListener.EventTime, audioTrackConfig: AudioSink.AudioTrackConfig) {
-            bitstreamFlow.value = audioTrackConfig.encoding in BITSTREAM_ENCODINGS
-            if (bitstreamFlow.value) audioDecoderFlow.value = "Bitstream (HDMI)"
-        }
-
-        override fun onDroppedVideoFrames(eventTime: AnalyticsListener.EventTime, droppedFrames: Int, elapsedMs: Long) {
-            droppedFlow.value += droppedFrames
-        }
     }
 
     private fun rebuildTracks(tracks: Tracks) {

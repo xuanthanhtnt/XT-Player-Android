@@ -45,7 +45,7 @@ class PlayerController(
 
     fun start() {
         load(indexState.value)
-        scope.launch { engine.state.collect(::onState) }
+        scope.launch { engine.state.collect { onState(it) } }
         scope.launch {
             engine.video.collect { video ->
                 if (video.fps > 0) onFrameRate(video.fps)
