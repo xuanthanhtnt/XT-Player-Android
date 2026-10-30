@@ -22,6 +22,7 @@ import kotlinx.coroutines.launch
 class XTPlayerApp : Application(), ImageLoaderFactory {
     override fun onCreate() {
         super.onCreate()
+        com.xuanthanhtnt.xtplayer.core.CrashLog.install(this)
         AppGraph.init(this)
     }
 

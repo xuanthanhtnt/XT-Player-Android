@@ -29,6 +29,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -124,12 +126,11 @@ fun SettingsScreen() {
             SecretField("Mật khẩu", "opensubtitles.password")
         }
 
-        section(
-            "Trakt",
-            "Tạo ứng dụng tại trakt.tv/oauth/applications/new (Redirect URI: http://localhost), dán Client ID. Ứng dụng Trakt mới (PKCE) không có Client Secret — để trống ô đó.",
-        ) { TraktSection() }
+        section("Trakt", null) { TraktSection() }
 
         section("Cập nhật", "Bản cập nhật lấy từ GitHub Releases (${BuildConfig.UPDATE_REPOSITORY}).") { UpdateSection() }
+
+        section("Nhật ký lỗi", "Nếu XT-Player bị dừng đột ngột, gửi nhật ký này để sửa lỗi.") { CrashSection() }
 
         section("Giới thiệu", null) {
             InfoRow("Phiên bản", BuildConfig.VERSION_NAME)
@@ -223,6 +224,10 @@ private fun InfoRow(label: String, value: String) {
     }
 }
 
+/**
+ * Trakt sign-in with the user's own account: press "Kết nối Trakt", open trakt.tv/activate on any device, enter the
+ * code. The Trakt application (Client ID) is built into the app; a personal one can still be set under "Nâng cao".
+ */
 @Composable
 private fun TraktSection() {
     val trakt = AppGraph.trakt
@@ -231,15 +236,35 @@ private fun TraktSection() {
     val status by trakt.status.collectAsState()
     val syncing by trakt.isSyncing.collectAsState()
     val actions = LocalAppActions.current
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        SecretField("Client ID (Mã khách hàng)", "trakt.clientID")
-        SecretField("Client Secret (để trống nếu không có)", "trakt.clientSecret")
+    val context = LocalContext.current
+    var advanced by remember { mutableStateOf(false) }
+    var hasClient by remember { mutableStateOf(trakt.hasAppCredentials) }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         when (val p = phase) {
-            TraktService.Phase.Disconnected -> Button(onClick = trakt::startLogin) { Text("Kết nối Trakt") }
+            TraktService.Phase.Disconnected -> {
+                Text(
+                    "Đăng nhập bằng tài khoản Trakt để đồng bộ phim đã xem và điểm xem tiếp với các thiết bị khác.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Button(onClick = {
+                    hasClient = trakt.hasAppCredentials
+                    if (hasClient) trakt.startLogin() else advanced = true
+                }) { Text("Kết nối Trakt") }
+            }
             is TraktService.Phase.AwaitingCode -> {
-                Text("Mở ${p.url} trên điện thoại hoặc máy tính và nhập mã:", style = MaterialTheme.typography.bodyMedium)
-                Text(p.code, style = MaterialTheme.typography.headlineMedium, color = XtColors.lime, fontWeight = FontWeight.Black)
-                OutlinedButton(onClick = trakt::cancelLogin) { Text("Huỷ") }
+                Text("Trên điện thoại hoặc máy tính, mở ${p.url}, đăng nhập Trakt rồi nhập mã:", style = MaterialTheme.typography.bodyMedium)
+                Text(p.code, style = MaterialTheme.typography.displaySmall, color = XtColors.lime, fontWeight = FontWeight.Black)
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Button(onClick = {
+                        copyText(context, p.code)
+                        runCatching {
+                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(p.url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                        }
+                    }) { Text("Mở trang kích hoạt") }
+                    OutlinedButton(onClick = { copyText(context, p.code) }) { Text("Sao chép mã") }
+                    OutlinedButton(onClick = trakt::cancelLogin) { Text("Huỷ") }
+                }
+                Text("XT-Player tự kết nối khi bạn nhập mã xong.", style = MaterialTheme.typography.bodySmall, color = XtColors.secondaryText)
             }
             TraktService.Phase.Connected -> {
                 Text("Đã kết nối" + if (username.isNotEmpty()) " — $username" else "", style = MaterialTheme.typography.bodyLarge)
@@ -251,9 +276,45 @@ private fun TraktSection() {
             }
         }
         if (status.isNotEmpty()) Text(status, style = MaterialTheme.typography.bodySmall, color = XtColors.secondaryText)
-        if (!trakt.hasAppCredentials) {
-            Text("Chưa có Client ID — lưu Client ID ở trên trước khi kết nối.", style = MaterialTheme.typography.bodySmall, color = XtColors.secondaryText)
+        if (!hasClient && advanced) {
+            Text(
+                "Bản cài này chưa có sẵn ứng dụng Trakt. Tạo một lần tại trakt.tv/oauth/applications/new (Redirect URI: http://localhost), " +
+                    "dán Client ID dưới đây, Lưu, rồi bấm Kết nối Trakt.",
+                style = MaterialTheme.typography.bodySmall,
+                color = XtColors.lime,
+            )
         }
+        Text(
+            if (advanced) "Ẩn nâng cao" else "Nâng cao: ứng dụng Trakt riêng",
+            style = MaterialTheme.typography.labelLarge,
+            color = XtColors.leaf,
+            modifier = Modifier
+                .focusClickable(RoundedCornerShape(8.dp), focusScale = 1.03f) { advanced = !advanced }
+                .padding(vertical = 6.dp, horizontal = 4.dp),
+        )
+        if (advanced) {
+            SecretField("Client ID (Mã khách hàng)", "trakt.clientID")
+            SecretField("Client Secret (để trống nếu không có)", "trakt.clientSecret")
+        }
+    }
+}
+
+private fun copyText(context: android.content.Context, text: String) {
+    val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+    clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Trakt", text))
+}
+
+/** The last crash report (also offered on the home screen right after a crash). */
+@Composable
+private fun CrashSection() {
+    var report by remember { mutableStateOf<String?>(null) }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        OutlinedButton(onClick = { report = com.xuanthanhtnt.xtplayer.core.CrashLog.last() ?: "Chưa có lỗi nào được ghi lại." }) {
+            Text("Xem nhật ký lỗi gần nhất")
+        }
+    }
+    report?.let { text ->
+        com.xuanthanhtnt.xtplayer.ui.CrashReportDialog(text, title = "Nhật ký lỗi") { report = null }
     }
 }
 

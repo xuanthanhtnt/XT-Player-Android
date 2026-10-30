@@ -197,7 +197,7 @@ class SmbFileReader private constructor(
         private const val MIN_AHEAD = 4
         private const val MAX_AHEAD = 16
         private const val MAX_INFLIGHT = 8
-        private const val MAX_BLOCKS = 40
+        private const val MAX_BLOCKS = 24
         private const val IDLE_SECONDS = 20L
 
         private val readers = HashMap<String, SmbFileReader>()

@@ -22,6 +22,8 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.media3.session.MediaSession
 import com.xuanthanhtnt.xtplayer.AppGraph
+import com.xuanthanhtnt.xtplayer.core.CrashLog
+import com.xuanthanhtnt.xtplayer.ui.CrashReportDialog
 import com.xuanthanhtnt.xtplayer.ui.theme.XtTheme
 import kotlinx.coroutines.launch
 import kotlin.math.abs
@@ -91,13 +93,34 @@ class PlayerActivity : ComponentActivity() {
             finish()
             return
         }
+        try {
+            start(session)
+        } catch (e: Throwable) {
+            // Show what went wrong instead of closing the app; the report is also offered on the home screen.
+            CrashLog.record(e)
+            engine?.release()
+            engine = null
+            controller = null
+            val report = CrashLog.last().orEmpty()
+            setContent {
+                XtTheme(isTv = isTv, isWide = true) {
+                    CrashReportDialog(report, title = "Không mở được trình phát") { finish() }
+                }
+            }
+        }
+    }
+
+    private fun start(session: PlaybackSession) {
         val engine = PlayerEngine(this).also { engine = it }
         mediaSession = runCatching { MediaSession.Builder(this, engine.player).setId("xtplayer-${System.nanoTime()}").build() }.getOrNull()
         val controller = PlayerController(engine, session, lifecycleScope, ::matchFrameRate).also { controller = it }
         setContent {
             XtTheme(isTv = isTv, isWide = true) {
                 CompositionLocalProvider(LocalPlayerController provides controller) {
-                    PlayerScreen(controller = controller, isTv = isTv, inPip = inPip.value, onClose = ::close)
+                    PlayerScreen(
+                        controller = controller, isTv = isTv, inPip = inPip.value, onClose = ::close,
+                        onPip = if (canPip) ({ enterPip(onlyWhenPlaying = false) }) else null,
+                    )
                 }
             }
         }
@@ -118,13 +141,15 @@ class PlayerActivity : ComponentActivity() {
 
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
-        enterPipIfPlaying()
+        enterPip(onlyWhenPlaying = true)
     }
 
-    private fun enterPipIfPlaying() {
+    private val canPip: Boolean
+        get() = !isTv && packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
+
+    private fun enterPip(onlyWhenPlaying: Boolean) {
         val engine = engine ?: return
-        if (isTv || engine.state.value != PlaybackState.Playing) return
-        if (!packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)) return
+        if (!canPip || (onlyWhenPlaying && engine.state.value != PlaybackState.Playing)) return
         val video = engine.video.value
         val ratio = if (video.width > 0 && video.height > 0) {
             val r = video.width.toFloat() / video.height

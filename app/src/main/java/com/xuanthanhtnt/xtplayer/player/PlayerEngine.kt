@@ -214,7 +214,11 @@ class PlayerEngine(context: Context) {
                 .setPreferredTextLanguages(*settings.languages(settings.subtitleLanguages.value).toTypedArray())
                 .setTunnelingEnabled(settings.tunneling.value)
         )
-        val cacheBytes = settings.cacheMegabytes.value.coerceIn(50, 2048) * 1024 * 1024
+        // The demuxed buffer lives in the Java heap: keep it well under the app's limit (large heap is 512 MB on
+        // most devices, 256 MB on some) or a fast NAS fills it in seconds and the app runs out of memory.
+        val heapBudget = (Runtime.getRuntime().maxMemory() * 0.35).toLong()
+        val cacheBytes = minOf(settings.cacheMegabytes.value.coerceIn(50, 2048) * 1024L * 1024L, heapBudget)
+            .coerceAtLeast(32L * 1024 * 1024).toInt()
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(30_000, 600_000, 2_000, 4_000)
             .setTargetBufferBytes(cacheBytes)

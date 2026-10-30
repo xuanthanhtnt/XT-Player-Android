@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.LibraryAdd
 import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Warning
@@ -128,7 +129,10 @@ fun SourcesScreen() {
             SourceCard(Icons.Filled.AddCircle, "Thêm máy chủ", "SMB (Windows / NAS) hoặc WebDAV — tự tìm NAS trong mạng") { actions.addServer() }
         }
         item {
-            SourceCard(Icons.Filled.FolderOpen, "Mở tệp trên thiết bị", "Bộ nhớ máy, USB, thẻ nhớ", onClick = actions.pickFile)
+            SourceCard(Icons.Filled.PhoneAndroid, "Thiết bị này", "Duyệt bộ nhớ trong, thẻ nhớ, USB — thêm thư mục vào thư viện như NAS", onClick = actions.openDevice)
+        }
+        item {
+            SourceCard(Icons.Filled.FolderOpen, "Chọn tệp", "Mở một tệp video bằng trình chọn tệp của Android", onClick = actions.pickFile)
         }
         item {
             SourceCard(Icons.Filled.Link, "Mở URL", "Đường dẫn http(s) tới tệp video", onClick = actions.openUrl)
@@ -204,7 +208,7 @@ fun BrowserScreen(serverID: String, path: String, title: String) {
     val dimens = LocalDimens.current
     var reload by remember { mutableIntStateOf(0) }
     val server by produceState<ServerCredentials?>(null, serverID) {
-        value = dao.server(serverID)?.credentials?.also(ServerRegistry::register)
+        value = ServerRegistry.lookup(serverID)?.also(ServerRegistry::register)
     }
     var listing by remember(serverID, path) { mutableStateOf<List<RemoteItem>>(emptyList()) }
     var loading by remember(serverID, path) { mutableStateOf(true) }
@@ -295,7 +299,14 @@ fun BrowserScreen(serverID: String, path: String, title: String) {
                 title = dir.name,
                 detail = null,
                 leading = {
-                    Icon(if (path.isEmpty()) Icons.Filled.Dns else Icons.Filled.Folder, null, tint = XtColors.leaf, modifier = Modifier.size(28.dp))
+                    Icon(
+                        when {
+                            path.isNotEmpty() -> Icons.Filled.Folder
+                            serverID == com.xuanthanhtnt.xtplayer.network.LocalStorage.SERVER_ID -> Icons.Filled.PhoneAndroid
+                            else -> Icons.Filled.Dns
+                        },
+                        null, tint = XtColors.leaf, modifier = Modifier.size(28.dp),
+                    )
                 },
             ) { actions.openBrowser(serverID, dir.path, dir.name) }
         }
@@ -461,7 +472,7 @@ fun AddServerScreen() {
         item { FormLabel("Loại máy chủ") }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                ServerKind.entries.forEach { option -> SortChip(option.label, option == kind) { kind = option } }
+                ServerKind.entries.filter { it != ServerKind.LOCAL }.forEach { option -> SortChip(option.label, option == kind) { kind = option } }
             }
         }
         item { FormLabel("Địa chỉ") }

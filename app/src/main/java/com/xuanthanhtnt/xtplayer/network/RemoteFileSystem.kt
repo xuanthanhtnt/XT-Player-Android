@@ -10,7 +10,9 @@ import java.util.concurrent.ConcurrentHashMap
 
 enum class ServerKind(val raw: String, val label: String) {
     SMB("smb", "SMB (Windows / NAS)"),
-    WEBDAV("webdav", "WebDAV");
+    WEBDAV("webdav", "WebDAV"),
+    /** This device: internal storage, SD cards and USB drives (a built-in source, not a saved server). */
+    LOCAL("local", "Thiết bị này");
 
     companion object {
         fun from(raw: String) = entries.firstOrNull { it.raw == raw } ?: SMB
@@ -69,6 +71,7 @@ object RemoteFileSystems {
     fun make(server: ServerCredentials): RemoteFileSystem = when (server.kind) {
         ServerKind.SMB -> SmbFileSystem(server)
         ServerKind.WEBDAV -> WebDavFileSystem(server)
+        ServerKind.LOCAL -> LocalFileSystem()
     }
 
     /**
@@ -78,10 +81,12 @@ object RemoteFileSystems {
     fun playbackUri(server: ServerCredentials, path: String): Uri = when (server.kind) {
         ServerKind.SMB -> Uri.Builder().scheme(SMB_SCHEME).authority(server.id).path("/" + path.trim('/')).build()
         ServerKind.WEBDAV -> Uri.Builder().scheme(DAV_SCHEME).authority(server.id).path(if (path.startsWith("/")) path else "/$path").build()
+        ServerKind.LOCAL -> Uri.fromFile(java.io.File(path))
     }
 
-    /** Credential-free identity of a remote file (shared by the library and the resume points). */
-    fun key(server: ServerCredentials, path: String): String = playbackUri(server, path).toString()
+    /** Credential-free identity of a remote file (shared by the library and the resume points); a plain path on this device. */
+    fun key(server: ServerCredentials, path: String): String =
+        if (server.kind == ServerKind.LOCAL) path else playbackUri(server, path).toString()
 
     /** The real http(s) URL of an `xtdav://` URI. */
     fun webDavUrl(server: ServerCredentials, uri: Uri): String =
@@ -97,9 +102,13 @@ object ServerRegistry {
     }
 
     /** Blocking (database) on a miss — call from a background thread. */
-    fun get(id: String): ServerCredentials? = servers[id] ?: runBlocking(Dispatchers.IO) {
+    fun get(id: String): ServerCredentials? = if (id == LocalStorage.SERVER_ID) LocalStorage.credentials else servers[id] ?: runBlocking(Dispatchers.IO) {
         AppGraph.dao.server(id)?.credentials
     }?.also { register(it) }
+
+    /** A saved server, or the built-in "this device" source. */
+    suspend fun lookup(id: String): ServerCredentials? =
+        if (id == LocalStorage.SERVER_ID) LocalStorage.credentials else AppGraph.dao.server(id)?.credentials
 
     suspend fun preload() {
         AppGraph.dao.servers().forEach { register(it.credentials) }

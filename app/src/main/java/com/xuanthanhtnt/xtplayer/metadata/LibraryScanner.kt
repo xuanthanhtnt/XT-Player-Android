@@ -53,7 +53,7 @@ class LibraryScanner {
     suspend fun scan(folder: LibraryFolder): Unit = withContext(Dispatchers.IO) {
         if (!scanning.compareAndSet(false, true)) return@withContext
         try {
-            val server = dao.server(folder.serverID)?.credentials ?: return@withContext
+            val server = ServerRegistry.lookup(folder.serverID) ?: return@withContext
             ServerRegistry.register(server)
             error.value = null
             statusText.value = "Đang quét ${folder.name}…"
@@ -143,7 +143,8 @@ class LibraryScanner {
         try {
             val items = dao.items().filter { !ThumbnailStore.isUsable(it.posterPath) && !ThumbnailStore.isUsable(it.backdropPath) }
             val filesByItem = dao.files().groupBy { it.itemKey }
-            val servers = dao.servers().associate { it.id to it.credentials }
+            val servers = dao.servers().associate { it.id to it.credentials } +
+                (com.xuanthanhtnt.xtplayer.network.LocalStorage.SERVER_ID to com.xuanthanhtnt.xtplayer.network.LocalStorage.credentials)
             val previous = statusText.value
 
             items.forEachIndexed { index, item ->

@@ -116,7 +116,7 @@ object PlaybackFactory {
         val servers = mutableMapOf<String, ServerCredentials?>()
         return files.mapNotNull { file ->
             val serverID = file.serverID ?: return@mapNotNull null
-            val server = servers.getOrPut(serverID) { dao.server(serverID)?.credentials } ?: return@mapNotNull null
+            val server = servers.getOrPut(serverID) { ServerRegistry.lookup(serverID) } ?: return@mapNotNull null
             val code = file.episodeCode
             val (title, subtitle) = if (item.kind == LibraryKind.SHOW && code != null) {
                 (file.episodeTitle?.let { "$code · $it" } ?: code) to item.title
@@ -138,7 +138,7 @@ object PlaybackFactory {
 
     /** Re-opens a Continue Watching entry. */
     suspend fun resume(entry: MediaEntry): PlaybackItem? {
-        val server = entry.serverID?.let { id -> dao.server(id)?.credentials ?: return null }
+        val server = entry.serverID?.let { id -> ServerRegistry.lookup(id) ?: return null }
         val file = dao.file(entry.key)
         val name = file?.fileName ?: Uri.decode(Uri.parse(entry.uri).lastPathSegment ?: entry.title)
         return PlaybackItem(

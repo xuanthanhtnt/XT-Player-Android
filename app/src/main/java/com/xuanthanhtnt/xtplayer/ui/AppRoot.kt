@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -27,7 +28,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Dns
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Search
@@ -76,6 +82,8 @@ import androidx.navigation.navArgument
 import com.xuanthanhtnt.xtplayer.AppGraph
 import com.xuanthanhtnt.xtplayer.R
 import com.xuanthanhtnt.xtplayer.core.ByteFormat
+import com.xuanthanhtnt.xtplayer.network.LocalStorage
+import com.xuanthanhtnt.xtplayer.network.ServerKind
 import com.xuanthanhtnt.xtplayer.player.PlaybackFactory
 import com.xuanthanhtnt.xtplayer.player.PlaybackSession
 import com.xuanthanhtnt.xtplayer.player.PlayerLauncher
@@ -115,6 +123,8 @@ class AppActions(
     val scope: CoroutineScope,
     val pickFile: () -> Unit,
     val openUrl: () -> Unit,
+    /** "Thiết bị này": asks for storage access when needed, then browses internal storage / SD / USB. */
+    val openDevice: () -> Unit,
 ) {
     fun openSection(route: String) {
         nav.navigate(route) {
@@ -128,6 +138,13 @@ class AppActions(
     fun openGrid(filter: LibraryFilter) = nav.navigate("grid/${filter.name}")
     fun openBrowser(serverID: String, path: String, title: String) =
         nav.navigate("browser/${encode(serverID)}?path=${encode(path)}&title=${encode(title)}")
+
+    /** A server or library folder picked in the sidebar: a fresh stack under Home, like a sidebar section. */
+    fun openBrowserRoot(serverID: String, path: String, title: String) =
+        nav.navigate("browser/${encode(serverID)}?path=${encode(path)}&title=${encode(title)}") {
+            popUpTo(nav.graph.findStartDestination().id)
+            launchSingleTop = true
+        }
 
     fun addServer() = nav.navigate("addServer")
     fun back() = nav.popBackStack()
@@ -160,11 +177,23 @@ fun XtApp(isTv: Boolean, wide: Boolean) {
             scope.launch { PlayerLauncher.play(context, PlaybackSession(listOf(PlaybackFactory.local(context, uri)))) }
         }
     }
+    var askStorage by remember { mutableStateOf(false) }
+    val browseDevice = { nav.navigate("browser/${AppActions.encode(LocalStorage.SERVER_ID)}?path=-&title=${AppActions.encode("Thiết bị này")}") }
+    val permissions = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { browseDevice() }
     val actions = remember(nav) {
         AppActions(nav, context, scope, pickFile = {
             runCatching { picker.launch(arrayOf("video/*", "application/x-matroska", "application/octet-stream")) }
-        }, openUrl = { showUrl = true })
+        }, openUrl = { showUrl = true }, openDevice = {
+            when {
+                LocalStorage.hasFullAccess(context) -> browseDevice()
+                android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R -> askStorage = true
+                else -> permissions.launch(LocalStorage.runtimePermissions())
+            }
+        })
     }
+    val backStack by nav.currentBackStackEntryAsState()
+    val route = backStack?.destination?.route
+    val canGoBack = route != null && Section.entries.none { it.route == route } && nav.previousBackStackEntry != null
 
     LaunchedEffect(Unit) { AppGraph.updates.checkIfDue() }
 
@@ -177,11 +206,16 @@ fun XtApp(isTv: Boolean, wide: Boolean) {
                     .windowInsetsPadding(WindowInsets.systemBars)
             ) {
                 SideBar(nav, isTv)
-                Box(Modifier.weight(1f).fillMaxHeight()) { AppNavHost(nav) }
+                Column(Modifier.weight(1f).fillMaxHeight()) {
+                    if (canGoBack) BackBar { nav.popBackStack() }
+                    Box(Modifier.weight(1f).fillMaxWidth()) { AppNavHost(nav) }
+                }
             }
         } else {
             Scaffold(
                 containerColor = XtColors.background,
+                contentColor = Color.White,
+                topBar = { if (canGoBack) BackBar(Modifier.statusBarsPadding()) { nav.popBackStack() } },
                 bottomBar = { BottomBar(nav) },
             ) { padding ->
                 Box(Modifier.fillMaxSize().appBackground().padding(padding)) { AppNavHost(nav) }
@@ -199,6 +233,54 @@ fun XtApp(isTv: Boolean, wide: Boolean) {
             }
         }
         UpdatePrompt()
+        CrashReportPrompt()
+        if (askStorage) {
+            AlertDialog(
+                onDismissRequest = { askStorage = false },
+                title = { Text("Cho phép đọc tệp trên thiết bị") },
+                text = {
+                    Text(
+                        "Để duyệt video và phụ đề (.srt, .ass) trong bộ nhớ, thẻ nhớ và USB, hãy bật \"Cho phép quản lý tất cả tệp\" " +
+                            "cho XT-Player ở trang sắp mở, rồi quay lại. Chọn \"Chỉ video\" nếu chỉ muốn cấp quyền xem video.",
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        askStorage = false
+                        if (!LocalStorage.openFullAccessSettings(context)) permissions.launch(LocalStorage.runtimePermissions())
+                    }) { Text("Mở cài đặt") }
+                },
+                dismissButton = {
+                    TextButton(onClick = {
+                        askStorage = false
+                        permissions.launch(LocalStorage.runtimePermissions())
+                    }) { Text("Chỉ video") }
+                },
+            )
+        }
+    }
+}
+
+/** "‹ Quay lại" above every page that is not a top-level section (touch screens have no other back button). */
+@Composable
+private fun BackBar(modifier: Modifier = Modifier, onBack: () -> Unit) {
+    Row(
+        modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Row(
+            Modifier
+                .focusClickable(RoundedCornerShape(20.dp), focusScale = 1.05f, onClick = onBack)
+                .background(Color.White.copy(alpha = 0.12f), RoundedCornerShape(20.dp))
+                .padding(start = 8.dp, end = 14.dp, top = 6.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, null, modifier = Modifier.size(22.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("Quay lại", style = MaterialTheme.typography.labelLarge)
+        }
     }
 }
 
@@ -239,30 +321,54 @@ private fun AppNavHost(nav: NavHostController) {
     }
 }
 
+/** The Mac app's sidebar: Search, Home, "Thư viện" (library filters), "Tệp" (servers, library folders, this device), Settings. */
 @Composable
 private fun SideBar(nav: NavHostController, isTv: Boolean) {
     val backStack by nav.currentBackStackEntryAsState()
     val route = backStack?.destination?.route
+    val args = backStack?.arguments
+    val browsing = route?.startsWith("browser/") == true
+    val browserServer = if (browsing) AppActions.decode(args?.getString("server")) else null
+    val browserPath = if (browsing) AppActions.decode(args?.getString("path")) else null
     val actions = LocalAppActions.current
+    val servers by remember { AppGraph.dao.serversFlow() }.collectAsState(initial = emptyList())
+    val folders by remember { AppGraph.dao.foldersFlow() }.collectAsState(initial = emptyList())
     Column(
         Modifier
-            .width(if (isTv) 220.dp else 210.dp)
+            .width(if (isTv) 230.dp else 220.dp)
             .fillMaxHeight()
             .background(Color.Black.copy(alpha = 0.25f))
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 12.dp, vertical = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         Row(Modifier.padding(start = 8.dp, bottom = 14.dp), verticalAlignment = Alignment.CenterVertically) {
             Image(painterResource(R.drawable.brand_mark), null, Modifier.size(34.dp))
             Spacer(Modifier.width(10.dp))
             Text("XT-Player", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
         }
-        for (section in Section.entries) {
-            if (section == Section.RECENT) SideHeader("Thư viện")
-            if (section == Section.SOURCES) SideHeader("Tệp")
-            SideItem(section, selected = route == section.route) { actions.openSection(section.route) }
+        SideItem(Section.SEARCH.icon, Section.SEARCH.label, route == Section.SEARCH.route) { actions.openSection(Section.SEARCH.route) }
+        SideItem(Section.HOME.icon, Section.HOME.label, route == Section.HOME.route) { actions.openSection(Section.HOME.route) }
+        SideHeader("Thư viện")
+        for (section in listOf(Section.MOVIES, Section.SHOWS, Section.RECENT, Section.UNWATCHED, Section.TOP_RATED, Section.GENRES)) {
+            SideItem(section.icon, section.label, route == section.route) { actions.openSection(section.route) }
         }
+        SideHeader("Tệp")
+        for (server in servers) {
+            SideItem(
+                if (server.kind == ServerKind.SMB) Icons.Filled.Dns else Icons.Filled.Language, server.name,
+                browserServer == server.id && browserPath.isNullOrEmpty(),
+            ) { actions.openBrowserRoot(server.id, "", server.name) }
+        }
+        for (folder in folders) {
+            SideItem(Icons.Filled.Folder, folder.name, browserServer == folder.serverID && browserPath == folder.path) {
+                actions.openBrowserRoot(folder.serverID, folder.path, folder.name)
+            }
+        }
+        SideItem(Icons.Filled.PhoneAndroid, "Thiết bị này", browserServer == LocalStorage.SERVER_ID, onClick = actions.openDevice)
+        SideItem(Section.SOURCES.icon, Section.SOURCES.label, route == Section.SOURCES.route) { actions.openSection(Section.SOURCES.route) }
+        Spacer(Modifier.height(10.dp))
+        SideItem(Section.SETTINGS.icon, Section.SETTINGS.label, route == Section.SETTINGS.route) { actions.openSection(Section.SETTINGS.route) }
     }
 }
 
@@ -277,7 +383,7 @@ private fun SideHeader(text: String) {
 }
 
 @Composable
-private fun SideItem(section: Section, selected: Boolean, onClick: () -> Unit) {
+private fun SideItem(icon: ImageVector, label: String, selected: Boolean, onClick: () -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -286,9 +392,12 @@ private fun SideItem(section: Section, selected: Boolean, onClick: () -> Unit) {
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(section.icon, null, tint = if (selected) XtColors.lime else Color.White.copy(alpha = 0.85f), modifier = Modifier.size(22.dp))
+        Icon(icon, null, tint = if (selected) XtColors.lime else Color.White.copy(alpha = 0.85f), modifier = Modifier.size(22.dp))
         Spacer(Modifier.width(12.dp))
-        Text(section.label, style = MaterialTheme.typography.bodyLarge, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
+        Text(
+            label, style = MaterialTheme.typography.bodyLarge, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+            maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+        )
     }
 }
 

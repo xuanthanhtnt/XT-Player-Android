@@ -1,5 +1,6 @@
 package com.xuanthanhtnt.xtplayer.ui.theme
 
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
@@ -92,7 +93,10 @@ fun XtTheme(isTv: Boolean, isWide: Boolean, content: @Composable () -> Unit) {
             else -> PhoneDimens
         },
     ) {
-        MaterialTheme(colorScheme = scheme, typography = typography, content = content)
+        MaterialTheme(colorScheme = scheme, typography = typography) {
+            // Text outside a Surface / Scaffold (the tablet and TV layout) must be white, not Compose's default black.
+            CompositionLocalProvider(LocalContentColor provides Color.White, content = content)
+        }
     }
 }
 

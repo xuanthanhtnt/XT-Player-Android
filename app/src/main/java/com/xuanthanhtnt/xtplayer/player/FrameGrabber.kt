@@ -39,7 +39,16 @@ object FrameGrabber {
         withContext(Dispatchers.IO) { runCatching { grabBlocking(location, output) }.getOrNull() }
     }
 
-    private fun grabBlocking(location: String, output: File): Probe? {
+    /** A retriever reading [location] (NAS files through [SmbFileReader]); the reader must be released with it. */
+    class Source(val retriever: MediaMetadataRetriever, private val reader: SmbFileReader?) {
+        fun close() {
+            runCatching { retriever.release() }
+            reader?.release()
+        }
+    }
+
+    /** Blocking. */
+    fun open(location: String): Source? {
         val retriever = MediaMetadataRetriever()
         var reader: SmbFileReader? = null
         try {
@@ -50,7 +59,7 @@ object FrameGrabber {
                     retriever.setDataSource(SmbMediaDataSource(reader))
                 }
                 RemoteFileSystems.DAV_SCHEME -> {
-                    val server = ServerRegistry.get(uri.authority ?: "") ?: return null
+                    val server = ServerRegistry.get(uri.authority ?: "") ?: throw IllegalStateException("no server")
                     val headers = if (server.username.isNotEmpty()) {
                         mapOf("Authorization" to Credentials.basic(server.username, server.password, Charsets.UTF_8))
                     } else {
@@ -61,8 +70,20 @@ object FrameGrabber {
                 "content", "file" -> retriever.setDataSource(AppGraph.context, uri)
                 "http", "https" -> retriever.setDataSource(location, emptyMap())
                 null -> retriever.setDataSource(location)
-                else -> return null
+                else -> throw IllegalStateException("unsupported")
             }
+            return Source(retriever, reader)
+        } catch (e: Exception) {
+            runCatching { retriever.release() }
+            reader?.release()
+            return null
+        }
+    }
+
+    private fun grabBlocking(location: String, output: File): Probe? {
+        val source = open(location) ?: return null
+        val retriever = source.retriever
+        try {
             val durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
             var width = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
             var height = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
@@ -88,8 +109,7 @@ object FrameGrabber {
             temp.renameTo(output)
             return Probe(durationMs / 1000.0, width, height)
         } finally {
-            runCatching { retriever.release() }
-            reader?.release()
+            source.close()
         }
     }
 }
