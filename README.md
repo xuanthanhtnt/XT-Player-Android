@@ -26,14 +26,15 @@
 | Android TV | Có trên màn hình chính (banner), điều khiển hoàn toàn bằng remote (D-pad, OK, ◀▶ tua, phím media), **khớp tần số quét** (Match Content) |
 | Ổ mạng | **SMB2/3** (liệt kê share, đọc trước 4 luồng + cache khối 1 MiB, tự kết nối lại khi NAS ngắt), **WebDAV** (HTTP/HTTPS, Basic/Digest, chứng chỉ tự ký), **tự tìm NAS** qua mDNS; ảnh thu nhỏ từng video khi duyệt thư mục; mật khẩu mã hoá bằng Android Keystore |
 | Thư viện | Quét thư mục NAS, nhận diện phim / tập, poster, backdrop, diễn viên, tóm tắt, tên & ảnh từng tập từ **TMDb**; không có trên TMDb thì lấy khung hình trong video làm ảnh bìa; Tiếp tục xem, Mới thêm, Phim, TV Shows, Chưa xem, Điểm cao, Thể loại, Tìm kiếm (không cần gõ dấu) |
-| Trình phát | Giống bản Mac: nút Đóng / Xem từ đầu, thanh nổi (âm lượng · ⏮ ↺ ▶ ↻ ⏭ · ⚙︎ · cửa sổ nổi · khung hình), **ảnh xem trước khi tua**, thanh tua (kéo / chạm / D-pad giữ để tua nhanh), bảng **Âm thanh · Phụ đề · Video · Thông tin**, phụ đề rời cạnh file trên NAS (.srt/.ass/.vtt), cỡ / vị trí / nền chữ, **tìm & tải phụ đề OpenSubtitles**, Up Next, tốc độ 0.5–2×, Fit / Fill / Stretch, chạm đúp để tua, picture-in-picture (điện thoại / tablet), MediaSession (phím media, Google Assistant) |
+| Trình phát | Giống bản Mac: nút Đóng / Xem từ đầu, thanh nổi (âm lượng · ⏮ ↺ ▶ ↻ ⏭ · ⚙︎ · cửa sổ nổi · khung hình), **ảnh xem trước khi tua**, thanh tua (kéo / chạm / D-pad giữ để tua nhanh), bảng **Âm thanh · Phụ đề · Video · Thông tin**, phụ đề rời cạnh file trên NAS (.srt/.ass/.vtt), cỡ / vị trí / nền chữ, **tìm & tải phụ đề OpenSubtitles**, Up Next, tốc độ 0.5–2×, Fit / Fill / Stretch, chạm đúp để tua, picture-in-picture (điện thoại / tablet; mở video mới khi đang ở cửa sổ nhỏ thì phát luôn trong cửa sổ đó và phóng to), MediaSession (phím media, Google Assistant) |
+| Cast | Nút **Cast** trong trình phát (điện thoại / tablet): phát lên Chromecast / Google TV; TV lấy tệp gốc qua mạng LAN từ máy chủ HTTP nhỏ trong app (SMB, WebDAV, tệp trên máy), không chuyển mã — MP4 / WebM / MKV với H.264, HEVC, VP9 và AAC, MP3, Opus, AC3; ngắt kết nối thì xem tiếp trên máy tại đúng vị trí |
 | Trakt | Đăng nhập bằng **tài khoản Trakt** qua mã trên trakt.tv/activate (cả trên TV), scrobble, đồng bộ đã xem và điểm xem tiếp với các thiết bị khác (gồm XT-Player trên Apple TV / iPhone / Mac và Infuse) |
 | Thiết bị này | Duyệt bộ nhớ trong, thẻ nhớ, USB ngay trong app (có nút Quay lại, ảnh thu nhỏ), thêm thư mục vào thư viện như NAS; ngoài ra mở tệp bằng trình chọn tệp, URL http(s), "Mở bằng XT-Player" từ ứng dụng khác |
 | Cập nhật | Tự kiểm tra GitHub Releases mỗi ngày, tải APK và mở trình cài đặt của Android |
 
 ### Khác bản Apple
 
-- Chưa có: chương (chapter) của MKV, lệch phụ đề / lệch tiếng, AirPlay (Android tương đương là Chromecast — để sau).
+- Chưa có: chương (chapter) của MKV, lệch phụ đề / lệch tiếng. Thay AirPlay là Google Cast (cần Google Play services; phụ đề chưa gửi lên TV).
 - Phụ đề ASS hiển thị kiểu cơ bản (ExoPlayer chưa có libass như libmpv).
 - Một số định dạng cũ (WMV, RMVB, ISO, VOB) phụ thuộc thiết bị.
 
