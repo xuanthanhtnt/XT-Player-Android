@@ -194,7 +194,7 @@ class PlayerEngine(context: Context) {
         override fun onTracksChanged(tracks: Tracks) {
             rebuildTracks(tracks)
             player.videoFormat?.let { videoFlow.value = videoSignal(it) }
-            player.audioFormat?.let { audioFlow.value = audioSignal(it) }
+            player.audioFormat?.let { audioFlow.value = audioSignalFor(it) }
         }
     }
 
@@ -216,7 +216,7 @@ class PlayerEngine(context: Context) {
         }
 
         override fun onAudioInputFormatChanged(eventTime: AnalyticsListener.EventTime, format: Format, decoderReuseEvaluation: DecoderReuseEvaluation?) {
-            audioFlow.value = audioSignal(format)
+            audioFlow.value = audioSignalFor(format)
         }
 
         override fun onAudioTrackInitialized(eventTime: AnalyticsListener.EventTime, audioTrackConfig: AudioSink.AudioTrackConfig) {
@@ -392,16 +392,30 @@ class PlayerEngine(context: Context) {
         bufferingFlow.value = player.playbackState == Player.STATE_BUFFERING
     }
 
+    /**
+     * True when the file has one audio track. Its language tag is then not shown: MKV / WebM without a Language
+     * element read as "eng" (the Matroska default), so a Vietnamese clip would say "Tiếng Anh".
+     */
+    private var singleAudio = true
+
+    private fun audioSignalFor(format: Format): AudioSignal =
+        audioSignal(format).let { if (singleAudio) it.copy(language = "") else it }
+
     private fun rebuildTracks(tracks: Tracks) {
         val audio = mutableListOf<MediaTrack>()
         val text = mutableListOf<MediaTrack>()
+        singleAudio = tracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }.sumOf { it.length } <= 1
         tracks.groups.forEachIndexed { g, group ->
             for (i in 0 until group.length) {
                 val format = group.getTrackFormat(i)
                 val track = MediaTrack(
                     id = "$g:$i",
                     type = group.type,
-                    label = trackLabel(format, if (group.type == C.TRACK_TYPE_AUDIO) audio.size else text.size),
+                    label = if (group.type == C.TRACK_TYPE_AUDIO && singleAudio) {
+                        format.label?.takeIf { it.isNotBlank() } ?: "Âm thanh gốc"
+                    } else {
+                        trackLabel(format, if (group.type == C.TRACK_TYPE_AUDIO) audio.size else text.size)
+                    },
                     detail = trackDetail(format),
                     selected = group.isTrackSelected(i),
                     supported = group.isTrackSupported(i),
