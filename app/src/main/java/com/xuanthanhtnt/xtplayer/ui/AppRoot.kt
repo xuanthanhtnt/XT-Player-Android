@@ -126,11 +126,19 @@ class AppActions(
     /** "Thiết bị này": asks for storage access when needed, then browses internal storage / SD / USB. */
     val openDevice: () -> Unit,
 ) {
+    /**
+     * A sidebar / bottom-bar section. Always a fresh page: saving and restoring section stacks made "Trang chủ"
+     * bring back the folder that was open (the saved stack is keyed to the start destination, which is Home).
+     */
     fun openSection(route: String) {
+        val start = nav.graph.findStartDestination()
+        if (route == start.route) {
+            nav.popBackStack(start.id, inclusive = false)
+            return
+        }
         nav.navigate(route) {
-            popUpTo(nav.graph.findStartDestination().id) { saveState = true }
+            popUpTo(start.id)
             launchSingleTop = true
-            restoreState = true
         }
     }
 

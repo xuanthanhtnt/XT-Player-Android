@@ -307,8 +307,13 @@ class TraktService {
                 .filter { it.identity !in remoteWatched }.distinct()
             if (missing.isNotEmpty()) setWatched(true, missing)
 
-            statusState.value = "Đã đồng bộ: $resumed điểm xem tiếp, $marked mục đã xem" +
-                if (missing.isEmpty()) "" else ", gửi ${missing.size} lên Trakt"
+            statusState.value = if (index.media.isEmpty()) {
+                "Thư viện chưa có phim / tập nào Trakt nhận ra. Trakt chỉ đồng bộ phim và TV show có trên TMDb " +
+                    "(cần khoá TMDb trong Cài đặt ▸ Thư viện); video ca nhạc, clip tự quay không có trên Trakt."
+            } else {
+                "Đã đồng bộ: $resumed điểm xem tiếp, $marked mục đã xem" +
+                    if (missing.isEmpty()) "" else ", gửi ${missing.size} lên Trakt"
+            }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {

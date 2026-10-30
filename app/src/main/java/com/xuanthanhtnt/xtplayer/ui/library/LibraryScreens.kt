@@ -99,7 +99,11 @@ private fun filtered(all: List<LibraryItem>, index: LibraryIndex, filter: Librar
         LibraryFilter.MOVIES -> all.filter { it.kind == LibraryKind.MOVIE }
         LibraryFilter.SHOWS -> all.filter { it.kind == LibraryKind.SHOW }
         LibraryFilter.RECENT -> return all.sortedByDescending { it.addedAt }.take(60)
-        LibraryFilter.UNWATCHED -> all.filter { !index.progress(it).watched }
+        LibraryFilter.UNWATCHED -> all.filter { item ->
+            val state = index.progress(item)
+            if (item.kind == LibraryKind.SHOW) !state.watched
+            else !state.watched && index.files(item).none { (index.entry(it)?.position ?: 0.0) > 30 }
+        }
         LibraryFilter.TOP_RATED -> all.filter { (it.rating ?: 0.0) > 0 }
     }
     return when (sort) {
