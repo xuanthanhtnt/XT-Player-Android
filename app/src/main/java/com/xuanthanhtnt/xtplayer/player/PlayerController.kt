@@ -36,6 +36,13 @@ class PlayerController(
     val hasPrevious: Boolean get() = indexState.value > 0
     val next: PlaybackItem? get() = items.getOrNull(indexState.value + 1)
 
+    /** While casting: the TV's (position, duration), used for resume points. */
+    var positionOverride: (() -> Pair<Double, Double>?)? = null
+    /** While casting: this device's player stays paused when the queue moves on. */
+    var holdLocal = false
+    /** After a queue item is loaded (the Cast bridge sends it on to the TV). */
+    var onLoaded: ((PlaybackItem) -> Unit)? = null
+
     private var traktMedia: TraktMedia? = null
     private var traktStarted = false
     private var learned = false
@@ -81,10 +88,19 @@ class PlayerController(
         traktMedia = null
         item.server?.let(com.xuanthanhtnt.xtplayer.network.ServerRegistry::register)
         engine.load(item)
+        if (holdLocal) engine.pause()
+        onLoaded?.invoke(item)
         scope.launch {
             traktMedia = TraktMedia.from(item.key, item.fileName)
             MediaLibrary.touch(item)
         }
+    }
+
+    /** The TV finished the item: it counts as watched, and the next one follows on the TV. */
+    fun remoteEnded() {
+        finished = true
+        saveProgress()
+        if (AppGraph.settings.autoplayNext.value && hasNext) advance(1)
     }
 
     fun advance(step: Int) {
@@ -122,8 +138,8 @@ class PlayerController(
 
     fun saveProgress() {
         val key = currentState.value.key
-        val duration = engine.duration.value
-        val position = if (finished) duration else engine.position.value
+        val (playhead, duration) = positionOverride?.invoke() ?: (engine.position.value to engine.duration.value)
+        val position = if (finished) duration else playhead
         if (duration <= 0 && position <= 0) return
         AppGraph.scope.launch { MediaLibrary.saveProgress(key, position, duration) }
     }

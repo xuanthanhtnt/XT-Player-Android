@@ -32,3 +32,6 @@
 -dontwarn org.bouncycastle.**
 -dontwarn net.engio.**
 -dontwarn kotlinx.serialization.**
+
+# Google Cast: the options provider is named in the manifest and created by reflection.
+-keep class androidx.media3.cast.DefaultCastOptionsProvider { *; }

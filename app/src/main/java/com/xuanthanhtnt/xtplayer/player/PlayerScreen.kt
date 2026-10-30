@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.AspectRatio
+import androidx.compose.material.icons.filled.Cast
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PictureInPictureAlt
 import androidx.compose.material.icons.filled.Settings
@@ -136,7 +137,14 @@ enum class PlayerPanel(val title: String) {
 }
 
 @Composable
-fun PlayerScreen(controller: PlayerController, isTv: Boolean, inPip: Boolean, onClose: () -> Unit, onPip: (() -> Unit)? = null) {
+fun PlayerScreen(
+    controller: PlayerController,
+    isTv: Boolean,
+    inPip: Boolean,
+    onClose: () -> Unit,
+    onPip: (() -> Unit)? = null,
+    castBridge: CastBridge? = null,
+) {
     val engine = controller.engine
     val settings = AppGraph.settings
     val state by engine.state.collectAsState()
@@ -159,6 +167,9 @@ fun PlayerScreen(controller: PlayerController, isTv: Boolean, inPip: Boolean, on
     var resumeChip by remember { mutableStateOf(false) }
     val rootFocus = remember { FocusRequester() }
     val playFocus = remember { FocusRequester() }
+    val noRemote = remember { kotlinx.coroutines.flow.MutableStateFlow<CastBridge.Remote?>(null) }
+    val remote by (castBridge?.remote ?: noRemote).collectAsState()
+    var showCast by remember { mutableStateOf(false) }
     val thumbnailScope = rememberCoroutineScope()
     val thumbnails = remember { ScrubThumbnailer(thumbnailScope) }
     DisposableEffect(Unit) { onDispose { thumbnails.release() } }
@@ -222,7 +233,8 @@ fun PlayerScreen(controller: PlayerController, isTv: Boolean, inPip: Boolean, on
             .background(Color.Black)
             .focusRequester(rootFocus)
             .onPreviewKeyEvent { event ->
-                if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                // While casting, the remote's keys drive the casting screen's buttons.
+                if (event.type != KeyEventType.KeyDown || remote != null) return@onPreviewKeyEvent false
                 when (event.nativeKeyEvent.keyCode) {
                     KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
                         engine.togglePause(); showControls(); true
@@ -327,7 +339,7 @@ fun PlayerScreen(controller: PlayerController, isTv: Boolean, inPip: Boolean, on
                 }
             }
 
-            AnimatedVisibility(controlsVisible && upNext == null, enter = fadeIn(), exit = fadeOut()) {
+            AnimatedVisibility(controlsVisible && upNext == null && remote == null, enter = fadeIn(), exit = fadeOut()) {
                 ControlsOverlay(
                     controller = controller,
                     position = position,
@@ -343,6 +355,7 @@ fun PlayerScreen(controller: PlayerController, isTv: Boolean, inPip: Boolean, on
                     onPanel = { panel = if (panel == null) it else null },
                     onSkip = ::skip,
                     onPip = onPip,
+                    onCast = castBridge?.let { { showCast = true } },
                 )
             }
 
@@ -380,6 +393,11 @@ fun PlayerScreen(controller: PlayerController, isTv: Boolean, inPip: Boolean, on
                         PlayerPanel.INFO -> Unit
                     }
                 }
+            }
+
+            if (castBridge != null) {
+                if (remote != null) CastingOverlay(castBridge, item, onClose)
+                if (showCast) CastPickerDialog(castBridge) { showCast = false }
             }
         }
     }
@@ -431,6 +449,7 @@ private fun ControlsOverlay(
     onPanel: (PlayerPanel) -> Unit,
     onSkip: (Boolean) -> Unit,
     onPip: (() -> Unit)?,
+    onCast: (() -> Unit)?,
 ) {
     val engine = controller.engine
     val item by controller.current.collectAsState()
@@ -521,6 +540,7 @@ private fun ControlsOverlay(
                     }
                 }
                 Row(Modifier.align(Alignment.CenterEnd).padding(end = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    if (onCast != null) BarButton(Icons.Filled.Cast, "Phát trên TV (Cast)", 22.dp) { onInteraction(); onCast() }
                     BarButton(Icons.Filled.Settings, "Âm thanh, phụ đề, video, thông tin", 22.dp) { onInteraction(); onPanel(PlayerPanel.AUDIO) }
                     if (onPip != null) BarButton(Icons.Filled.PictureInPictureAlt, "Cửa sổ nổi", 22.dp) { onPip() }
                     BarButton(Icons.Filled.AspectRatio, fit.label, 22.dp) {

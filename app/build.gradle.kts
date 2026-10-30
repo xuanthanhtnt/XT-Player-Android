@@ -35,8 +35,8 @@ android {
         applicationId = "com.xuanthanhtnt.xtplayer"
         minSdk = 26
         targetSdk = 35
-        versionCode = 6
-        versionName = "0.1.5"
+        versionCode = 7
+        versionName = "0.1.6"
 
         buildConfigField("String", "TMDB_API_KEY", "\"${buildKey("TMDB_API_KEY")}\"")
         buildConfigField("String", "OPENSUBTITLES_API_KEY", "\"${buildKey("OPENSUBTITLES_API_KEY")}\"")
@@ -134,6 +134,8 @@ dependencies {
     implementation(libs.media3.ui)
     implementation(libs.media3.session)
     implementation(libs.media3.datasource.okhttp)
+    implementation(libs.media3.cast)
+    implementation(libs.mediarouter)
     implementation(libs.jellyfin.ffmpeg)
 
     implementation(libs.room.runtime)

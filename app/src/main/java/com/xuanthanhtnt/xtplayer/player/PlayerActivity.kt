@@ -33,7 +33,9 @@ class PlayerActivity : ComponentActivity() {
     private var engine: PlayerEngine? = null
     private var controller: PlayerController? = null
     private var mediaSession: MediaSession? = null
+    private var castBridge: CastBridge? = null
     private val inPip = mutableStateOf(false)
+    private val castBridgeState = mutableStateOf<CastBridge?>(null)
     private var isTv = false
     private var switchedMode = false
 
@@ -65,6 +67,10 @@ class PlayerActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * A new video while this player is open — also while it is the small picture-in-picture window: it plays in this
+     * same player (no second window), and Android brings the window back to full screen with its own animation.
+     */
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         val pending = PlayerLauncher.pending
@@ -120,11 +126,17 @@ class PlayerActivity : ComponentActivity() {
                     PlayerScreen(
                         controller = controller, isTv = isTv, inPip = inPip.value, onClose = ::close,
                         onPip = if (canPip) ({ enterPip(onlyWhenPlaying = false) }) else null,
+                        castBridge = castBridgeState.value,
                     )
                 }
             }
         }
         controller.start()
+        // Cast on phones and tablets (a TV box is the screen already).
+        castBridge = if (isTv) null else CastBridge.create(this, controller, lifecycleScope)
+        castBridgeState.value = castBridge
+        lifecycleScope.launch { engine.video.collect { updatePipParams() } }
+        lifecycleScope.launch { engine.state.collect { updatePipParams() } }
     }
 
     private fun close() {
@@ -150,18 +162,37 @@ class PlayerActivity : ComponentActivity() {
     private fun enterPip(onlyWhenPlaying: Boolean) {
         val engine = engine ?: return
         if (!canPip || (onlyWhenPlaying && engine.state.value != PlaybackState.Playing)) return
-        val video = engine.video.value
-        val ratio = if (video.width > 0 && video.height > 0) {
+        if (Build.VERSION.SDK_INT >= 31 && onlyWhenPlaying) return   // auto-enter already animated the window down
+        runCatching { enterPictureInPictureMode(pipParams()) }
+    }
+
+    /**
+     * The video's shape (Android accepts 1:2.39 … 2.39:1); on Android 12+ the window also shrinks into
+     * picture-in-picture by itself when leaving the app while playing (the smooth system animation), and is not
+     * cross-faded while resizing (a video, not a document).
+     */
+    private fun pipParams(): PictureInPictureParams {
+        val video = engine?.video?.value
+        val ratio = if (video != null && video.width > 0 && video.height > 0) {
             val r = video.width.toFloat() / video.height
-            // Android accepts 1:2.39 … 2.39:1.
             Rational((r.coerceIn(0.42f, 2.38f) * 1000).roundToInt(), 1000)
         } else {
             Rational(16, 9)
         }
-        runCatching { enterPictureInPictureMode(PictureInPictureParams.Builder().setAspectRatio(ratio).build()) }
+        return PictureInPictureParams.Builder().setAspectRatio(ratio).apply {
+            if (Build.VERSION.SDK_INT >= 31) {
+                setAutoEnterEnabled(canPip && engine?.state?.value == PlaybackState.Playing)
+                setSeamlessResizeEnabled(false)
+            }
+        }.build()
+    }
+
+    private fun updatePipParams() {
+        if (canPip) runCatching { setPictureInPictureParams(pipParams()) }
     }
 
     override fun onDestroy() {
+        castBridge?.release(endCast = true)
         controller?.stop()
         mediaSession?.release()
         engine?.release()
