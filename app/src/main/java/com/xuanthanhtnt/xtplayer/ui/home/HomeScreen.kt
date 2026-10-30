@@ -1,11 +1,13 @@
 package com.xuanthanhtnt.xtplayer.ui.home
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -25,13 +28,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddCircle
 import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Lan
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Tv
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -46,19 +47,24 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.xuanthanhtnt.xtplayer.AppGraph
-import com.xuanthanhtnt.xtplayer.BuildConfig
 import com.xuanthanhtnt.xtplayer.R
-import com.xuanthanhtnt.xtplayer.core.TimeFormat
 import com.xuanthanhtnt.xtplayer.data.LibraryIndex
 import com.xuanthanhtnt.xtplayer.data.LibraryItem
 import com.xuanthanhtnt.xtplayer.data.LibraryKind
+import com.xuanthanhtnt.xtplayer.data.LibraryOrdering
 import com.xuanthanhtnt.xtplayer.data.MediaEntry
 import com.xuanthanhtnt.xtplayer.data.MediaLibrary
 import com.xuanthanhtnt.xtplayer.ui.ActionsDialog
@@ -74,15 +80,16 @@ import com.xuanthanhtnt.xtplayer.ui.TagChip
 import com.xuanthanhtnt.xtplayer.ui.focusClickable
 import com.xuanthanhtnt.xtplayer.ui.glassPanel
 import com.xuanthanhtnt.xtplayer.ui.library.LibraryFilter
-import com.xuanthanhtnt.xtplayer.ui.theme.HeroTitleStyle
 import com.xuanthanhtnt.xtplayer.ui.theme.LocalDimens
-import com.xuanthanhtnt.xtplayer.ui.theme.LocalIsTv
 import com.xuanthanhtnt.xtplayer.ui.theme.XtColors
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Locale
 
-/** Infuse-style home: a rotating featured hero, then Continue Watching / Recently Added / Movies / TV shelves. */
+/**
+ * Infuse-style home, as in the Apple app's HomeView: a rotating featured hero, then Continue Watching /
+ * Recently Added / Movies / TV shelves.
+ */
 @Composable
 fun HomeScreen() {
     val actions = LocalAppActions.current
@@ -94,7 +101,6 @@ fun HomeScreen() {
     val status by AppGraph.scanner.status.collectAsState()
     val scanError by AppGraph.scanner.lastError.collectAsState()
     val dimens = LocalDimens.current
-    val isTv = LocalIsTv.current
 
     val index = remember(files, entries) { LibraryIndex(files, entries) }
     val continueWatching = remember(entries) { entries.filter { it.resumePosition != null }.take(16) }
@@ -115,39 +121,26 @@ fun HomeScreen() {
 
     LazyColumn(
         Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(bottom = 32.dp),
-        verticalArrangement = Arrangement.spacedBy(26.dp),
+        contentPadding = PaddingValues(bottom = dimens.pagePadding),
+        verticalArrangement = Arrangement.spacedBy(30.dp),
     ) {
         item(key = "hero") {
             if (featured.isEmpty()) {
                 WelcomeHero()
             } else {
-                AnimatedContent(featured[featuredIndex % featured.size], transitionSpec = { fadeIn() togetherWith fadeOut() }, label = "hero") { item ->
+                AnimatedContent(
+                    featured[featuredIndex % featured.size],
+                    transitionSpec = { fadeIn(tween(600)) togetherWith fadeOut(tween(600)) },
+                    label = "hero",
+                ) { item ->
                     FeaturedHero(
                         item = item,
                         index = index,
-                        page = featuredIndex % featured.size,
                         pageCount = featured.size,
+                        page = featuredIndex % featured.size,
                         onPlay = { actions.scope.launch { LibraryActions.start(item, index, actions) } },
                         onDetail = { actions.openDetail(item.key) },
                     )
-                }
-            }
-        }
-        if (!isTv) {
-            item(key = "search") {
-                Row(
-                    Modifier
-                        .padding(horizontal = dimens.pagePadding)
-                        .fillMaxWidth()
-                        .focusClickable(RoundedCornerShape(14.dp), focusScale = 1.02f) { actions.openSection(Section.SEARCH.route) }
-                        .glassPanel(14.dp)
-                        .padding(14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(Icons.Filled.Search, null, tint = XtColors.secondaryText)
-                    Spacer(Modifier.size(10.dp))
-                    Text("Tìm trong thư viện", color = XtColors.secondaryText)
                 }
             }
         }
@@ -157,15 +150,20 @@ fun HomeScreen() {
                     Modifier
                         .padding(horizontal = dimens.pagePadding)
                         .fillMaxWidth()
-                        .glassPanel()
+                        .glassPanel(dimens.corner)
                         .padding(16.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     if (scanning) {
                         CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
-                        Spacer(Modifier.size(12.dp))
+                        Spacer(Modifier.width(12.dp))
                     }
-                    Text(scanError ?: status, color = if (scanError != null) XtColors.danger else XtColors.secondaryText, maxLines = 2)
+                    Text(
+                        scanError ?: status,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (scanError != null) XtColors.danger else XtColors.secondaryText,
+                        maxLines = 2,
+                    )
                 }
             }
         }
@@ -189,7 +187,7 @@ fun HomeScreen() {
         }
         if (items.isNotEmpty()) {
             item(key = "recent") {
-                ShelfRow("Mới thêm", onSeeAll = { actions.openGrid(LibraryFilter.RECENT) }) {
+                ShelfRow("Mới thêm") {
                     items(items.take(20), key = { it.key }) { posterItem(it, index) }
                 }
             }
@@ -243,12 +241,10 @@ private fun featuredItems(items: List<LibraryItem>, continueWatching: List<Media
     return picked.take(6)
 }
 
-/** Full-bleed backdrop with title, facts, synopsis and Play — the top of Infuse's home screen. */
+/** Full-bleed backdrop with kind, title, facts, synopsis and Play — the top of Infuse's home screen. */
 @Composable
-private fun FeaturedHero(item: LibraryItem, index: LibraryIndex, page: Int, pageCount: Int, onPlay: () -> Unit, onDetail: () -> Unit) {
+private fun FeaturedHero(item: LibraryItem, index: LibraryIndex, pageCount: Int, page: Int, onPlay: () -> Unit, onDetail: () -> Unit) {
     val dimens = LocalDimens.current
-    val files = index.files(item)
-    val resume = files.mapNotNull { index.entry(it) }.filter { it.resumePosition != null }.maxByOrNull { it.lastPlayedAt }
     Box(
         Modifier
             .fillMaxWidth()
@@ -259,45 +255,67 @@ private fun FeaturedHero(item: LibraryItem, index: LibraryIndex, page: Int, page
         Box(
             Modifier
                 .matchParentSize()
-                .background(Brush.verticalGradient(0f to Color.Transparent, 0.45f to Color.Transparent, 1f to XtColors.background))
+                .background(Brush.verticalGradient(listOf(Color.Transparent, XtColors.background.copy(alpha = 0.35f), XtColors.background)))
         )
         Box(
             Modifier
                 .matchParentSize()
-                .background(Brush.horizontalGradient(0f to XtColors.background.copy(alpha = 0.85f), 0.6f to Color.Transparent))
+                .background(Brush.horizontalGradient(0f to XtColors.background.copy(alpha = 0.85f), 0.5f to Color.Transparent))
         )
         Column(
             Modifier
                 .align(Alignment.BottomStart)
-                .padding(horizontal = dimens.pagePadding, vertical = 20.dp)
-                .widthIn(max = 640.dp)
+                .fillMaxWidth()
+                .padding(start = dimens.pagePadding, end = dimens.pagePadding, bottom = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text(item.title, style = HeroTitleStyle(dimens.heroTitle), maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Spacer(Modifier.height(8.dp))
+            Text(
+                if (item.kind == LibraryKind.SHOW) "TV SHOW" else "PHIM",
+                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.ExtraBold, letterSpacing = 2.sp),
+                color = XtColors.leaf,
+            )
+            Text(
+                item.title,
+                style = TextStyle(
+                    fontSize = dimens.heroTitle.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    lineHeight = (dimens.heroTitle * 1.1).sp,
+                    shadow = Shadow(Color.Black.copy(alpha = 0.4f), blurRadius = 16f),
+                ),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                metaParts(item, index).forEach { Text(it, style = MaterialTheme.typography.bodyMedium, color = XtColors.secondaryText) }
-                index.badges(item).take(3).forEach { TagChip(it) }
+                Text(facts(item), style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium), color = Color.White.copy(alpha = 0.8f))
+                index.badges(item).take(4).forEach { TagChip(it, highlighted = it == "DV" || it.startsWith("HDR")) }
             }
             item.overview?.takeIf { it.isNotBlank() }?.let {
-                Spacer(Modifier.height(8.dp))
-                Text(it, style = MaterialTheme.typography.bodyMedium, color = Color.White.copy(alpha = 0.85f), maxLines = 3, overflow = TextOverflow.Ellipsis)
-            }
-            Spacer(Modifier.height(14.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                HeroButton(
-                    if (resume != null) "Tiếp tục · ${TimeFormat.clock(resume.position)}" else "Phát",
-                    Icons.Filled.PlayArrow,
-                    primary = true,
-                    onClick = onPlay,
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color.White.copy(alpha = 0.75f),
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.widthIn(max = 640.dp),
                 )
-                HeroButton("Chi tiết", Icons.Filled.Info, primary = false, onClick = onDetail)
+            }
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                HeroButton(playTitle(item, index), Icons.Filled.PlayArrow, primary = true, onClick = onPlay)
+                HeroButton("Chi tiết", Icons.Outlined.Info, primary = false, onClick = onDetail)
+                Spacer(Modifier.weight(1f))
                 if (pageCount > 1) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(start = 8.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         repeat(pageCount) { i ->
                             Box(
                                 Modifier
-                                    .size(if (i == page) 8.dp else 6.dp)
-                                    .background(if (i == page) Color.White else Color.White.copy(alpha = 0.35f), CircleShape)
+                                    .size(width = if (i == page) 18.dp else 6.dp, height = 6.dp)
+                                    .background(if (i == page) Color.White else Color.White.copy(alpha = 0.3f), CircleShape)
                             )
                         }
                     }
@@ -307,34 +325,38 @@ private fun FeaturedHero(item: LibraryItem, index: LibraryIndex, page: Int, page
     }
 }
 
-private fun metaParts(item: LibraryItem, index: LibraryIndex): List<String> = buildList {
+/** "2019 · 2h 10m · ★ 7.8 · Hành động" */
+private fun facts(item: LibraryItem): String = buildList {
     item.year?.let { add("$it") }
-    if (item.kind == LibraryKind.SHOW) {
-        val files = index.files(item)
-        val seasons = files.mapNotNull { it.season }.toSet().size.coerceAtLeast(1)
-        add("$seasons mùa · ${files.size} tập")
-    } else {
-        item.runtime?.takeIf { it > 0 }?.let { add(TimeFormat.runtime(it)) }
-    }
+    if (item.kind == LibraryKind.MOVIE) item.runtime?.takeIf { it > 0 }?.let { add("${it / 60}h ${it % 60}m") }
     item.rating?.takeIf { it > 0 }?.let { add("★ " + String.format(Locale.US, "%.1f", it)) }
+    item.genres.firstOrNull()?.let { add(it) }
+}.joinToString(" · ")
+
+/** "Phát" / "Tiếp tục", with the episode for a show: "Tiếp tục S01E02". */
+private fun playTitle(item: LibraryItem, index: LibraryIndex): String {
+    val next = index.nextUp(index.files(item).sortedWith(LibraryOrdering.episodes)) ?: return "Phát"
+    val code = if (item.kind == LibraryKind.SHOW) next.episodeCode?.let { " $it" }.orEmpty() else ""
+    return if (index.entry(next)?.resumePosition != null) "Tiếp tục$code" else "Phát$code"
 }
 
+/** Large button of the heroes: white (prominent) or translucent (bordered). */
 @Composable
 fun HeroButton(text: String, icon: ImageVector, primary: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Row(
         modifier
             .focusClickable(RoundedCornerShape(12.dp), focusScale = 1.05f, onClick = onClick)
             .background(if (primary) Color.White else Color.White.copy(alpha = 0.16f), RoundedCornerShape(12.dp))
-            .padding(horizontal = 18.dp, vertical = 11.dp),
+            .padding(horizontal = 20.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(icon, null, tint = if (primary) Color.Black else Color.White, modifier = Modifier.size(22.dp))
+        Icon(icon, null, tint = if (primary) Color.Black else Color.White, modifier = Modifier.size(20.dp))
         Spacer(Modifier.size(8.dp))
-        Text(text, color = if (primary) Color.Black else Color.White, style = MaterialTheme.typography.titleSmall)
+        Text(text, color = if (primary) Color.Black else Color.White, style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold))
     }
 }
 
-/** First launch: what the app does and where to start. */
+/** Shown until the library has something in it. */
 @Composable
 private fun WelcomeHero() {
     val actions = LocalAppActions.current
@@ -342,26 +364,51 @@ private fun WelcomeHero() {
     Column(
         Modifier
             .fillMaxWidth()
-            .padding(horizontal = dimens.pagePadding, vertical = 40.dp),
-        horizontalAlignment = Alignment.Start,
+            .padding(start = dimens.pagePadding, end = dimens.pagePadding, top = 90.dp, bottom = 20.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(22.dp),
     ) {
-        Image(painterResource(R.drawable.brand_mark), null, Modifier.size(120.dp))
-        Spacer(Modifier.height(12.dp))
-        Text("XT-Player", style = HeroTitleStyle(dimens.heroTitle))
-        Spacer(Modifier.height(8.dp))
+        Image(
+            painterResource(R.drawable.brand_mark), null,
+            Modifier
+                .size(150.dp)
+                .shadow(30.dp, CircleShape, clip = false, ambientColor = XtColors.forest, spotColor = XtColors.forest),
+        )
+        Text(
+            "XT-Player",
+            style = TextStyle(fontSize = 44.sp, fontWeight = FontWeight.ExtraBold, brush = XtColors.brandGradient),
+        )
         Text(
             "Thêm NAS / máy chủ SMB hoặc WebDAV, chọn thư mục phim và \"Thêm vào thư viện\".\nPoster, nội dung và diễn viên được lấy tự động từ TMDb.",
-            style = MaterialTheme.typography.bodyLarge,
+            style = MaterialTheme.typography.bodyMedium,
             color = XtColors.secondaryText,
-            modifier = Modifier.widthIn(max = 640.dp),
+            textAlign = TextAlign.Center,
+            modifier = Modifier.widthIn(max = 620.dp),
         )
-        Spacer(Modifier.height(20.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            HeroButton("Thêm nguồn", Icons.Filled.AddCircle, primary = true) { actions.openSection(Section.SOURCES.route) }
-            HeroButton("Mở tệp", Icons.Filled.Folder, primary = false, onClick = actions.pickFile)
-            HeroButton("Mở URL", Icons.Filled.Link, primary = false, onClick = actions.openUrl)
+        Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            Row(
+                Modifier
+                    .focusClickable(RoundedCornerShape(12.dp), focusScale = 1.05f) { actions.openSection(Section.SOURCES.route) }
+                    .background(XtColors.accent, RoundedCornerShape(12.dp))
+                    .padding(horizontal = 20.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Filled.AddCircle, null, tint = Color.White, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.size(8.dp))
+                Text("Thêm nguồn", color = Color.White, style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold))
+            }
+            Row(
+                Modifier
+                    .focusClickable(RoundedCornerShape(12.dp), focusScale = 1.05f, onClick = actions.pickFile)
+                    .border(1.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(12.dp))
+                    .background(Color.White.copy(alpha = 0.10f), RoundedCornerShape(12.dp))
+                    .padding(horizontal = 20.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Filled.Folder, null, tint = XtColors.leaf, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.size(8.dp))
+                Text("Mở tệp", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold))
+            }
         }
-        Spacer(Modifier.height(16.dp))
-        Text("Phiên bản ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.labelSmall, color = XtColors.secondaryText)
     }
 }

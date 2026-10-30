@@ -40,6 +40,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -162,42 +163,55 @@ private fun BoxScope.Placeholder(icon: ImageVector) {
     Box(
         Modifier
             .matchParentSize()
-            .background(Brush.linearGradient(listOf(XtColors.forest.copy(alpha = 0.55f), XtColors.surfaceHigh))),
+            .background(Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.08f), Color.White.copy(alpha = 0.03f)))),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, null, tint = Color.White.copy(alpha = 0.45f), modifier = Modifier.size(36.dp))
-    }
-}
-
-/** Thin progress bar along the bottom of a card. */
-@Composable
-fun ProgressLine(progress: Double, modifier: Modifier = Modifier) {
-    Box(
-        modifier
-            .fillMaxWidth()
-            .height(4.dp)
-            .clip(CircleShape)
-            .background(Color.White.copy(alpha = 0.25f))
-    ) {
-        Box(
-            Modifier
-                .fillMaxWidth(progress.toFloat().coerceIn(0f, 1f))
-                .height(4.dp)
-                .background(XtColors.brandGradient)
+        Icon(
+            icon, null,
+            modifier = Modifier
+                .size(32.dp)
+                .graphicsLayer { compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen }
+                .drawWithCache {
+                    onDrawWithContent {
+                        drawContent()
+                        drawRect(XtColors.brandGradient, blendMode = androidx.compose.ui.graphics.BlendMode.SrcAtop)
+                    }
+                },
         )
     }
 }
 
-/** 2:3 poster with title, progress and a watched check. */
+/** Thin progress bar (leaf on a faint track), at least 4 dp of fill. */
+@Composable
+fun ProgressLine(progress: Double, modifier: Modifier = Modifier) {
+    androidx.compose.foundation.layout.BoxWithConstraints(
+        modifier
+            .fillMaxWidth()
+            .height(4.dp)
+            .clip(CircleShape)
+            .background(Color.White.copy(alpha = 0.22f))
+    ) {
+        Box(
+            Modifier
+                .width(maxOf(4.dp, maxWidth * progress.toFloat().coerceIn(0f, 1f)))
+                .height(4.dp)
+                .clip(CircleShape)
+                .background(XtColors.leaf)
+        )
+    }
+}
+
+/** 2:3 poster with the title underneath (Infuse-style library tile); on TV only the poster, as on Apple TV. */
 @Composable
 fun PosterCard(item: LibraryItem, progress: Double?, watched: Boolean, modifier: Modifier = Modifier, onLongClick: (() -> Unit)? = null, onClick: () -> Unit) {
     val dimens = LocalDimens.current
+    val isTv = LocalIsTv.current
     Column(modifier.width(dimens.posterWidth)) {
         Box(
             Modifier
                 .fillMaxWidth()
                 .aspectRatio(2f / 3f)
-                .focusClickable(RoundedCornerShape(dimens.corner * 0.7f), onLongClick = onLongClick, onClick = onClick)
+                .focusClickable(RoundedCornerShape(12.dp), onLongClick = onLongClick, onClick = onClick)
         ) {
             ArtworkImage(
                 item.posterPath,
@@ -206,25 +220,32 @@ fun PosterCard(item: LibraryItem, progress: Double?, watched: Boolean, modifier:
                 placeholderIcon = if (item.kind == LibraryKind.SHOW) Icons.Filled.Tv else Icons.Filled.Movie,
             )
             if (watched) {
-                Icon(
-                    Icons.Filled.CheckCircle, "Đã xem",
-                    tint = XtColors.leaf,
-                    modifier = Modifier.align(Alignment.TopEnd).padding(6.dp).background(Color.Black.copy(alpha = 0.5f), CircleShape),
-                )
+                Box(
+                    Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(8.dp)
+                        .size(22.dp)
+                        .background(Color.White, CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Filled.CheckCircle, "Đã xem", tint = XtColors.leaf, modifier = Modifier.size(24.dp))
+                }
             }
-            if (progress != null && progress > 0) {
+            if (progress != null) {
                 ProgressLine(progress, Modifier.align(Alignment.BottomCenter).padding(8.dp))
             }
         }
-        Spacer(Modifier.height(6.dp))
-        Text(item.title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        item.year?.let {
-            Text("$it", style = MaterialTheme.typography.bodySmall, color = XtColors.secondaryText, maxLines = 1)
+        if (!isTv) {
+            Spacer(Modifier.height(8.dp))
+            Text(item.title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            item.year?.let {
+                Text("$it", style = MaterialTheme.typography.bodySmall, color = XtColors.secondaryText, maxLines = 1)
+            }
         }
     }
 }
 
-/** 16:9 card for Continue Watching, episodes and the NAS browser. */
+/** 16:9 card for Continue Watching: title, subtitle and progress inside the picture, over a dark gradient. */
 @Composable
 fun LandscapeCard(
     title: String,
@@ -237,27 +258,30 @@ fun LandscapeCard(
     onClick: () -> Unit,
 ) {
     val dimens = LocalDimens.current
-    Column(modifier.width(dimens.landscapeWidth)) {
+    Box(
+        modifier
+            .width(dimens.landscapeWidth)
+            .aspectRatio(16f / 9f)
+            .focusClickable(RoundedCornerShape(12.dp), focusScale = 1.05f, onLongClick = onLongClick, onClick = onClick)
+    ) {
+        ArtworkImage(imagePath, Modifier.fillMaxSize(), size = "w780", placeholderIcon = placeholderIcon)
         Box(
             Modifier
+                .matchParentSize()
+                .background(Brush.verticalGradient(0f to Color.Transparent, 0.5f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.75f)))
+        )
+        Column(
+            Modifier
+                .align(Alignment.BottomStart)
                 .fillMaxWidth()
-                .aspectRatio(16f / 9f)
-                .focusClickable(RoundedCornerShape(dimens.corner * 0.7f), focusScale = 1.05f, onLongClick = onLongClick, onClick = onClick)
+                .padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            ArtworkImage(imagePath, Modifier.fillMaxSize(), size = "w780", placeholderIcon = placeholderIcon)
-            Box(
-                Modifier
-                    .matchParentSize()
-                    .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.55f))))
-            )
-            if (progress != null && progress > 0) {
-                ProgressLine(progress, Modifier.align(Alignment.BottomCenter).padding(10.dp))
+            Text(title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (!subtitle.isNullOrEmpty()) {
+                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.7f), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-        }
-        Spacer(Modifier.height(6.dp))
-        Text(title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        if (!subtitle.isNullOrEmpty()) {
-            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = XtColors.secondaryText, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (progress != null) ProgressLine(progress)
         }
     }
 }
@@ -285,10 +309,11 @@ fun ShelfRow(title: String, onSeeAll: (() -> Unit)? = null, content: LazyListSco
                 )
             }
         }
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(14.dp))
         LazyRow(
-            contentPadding = PaddingValues(horizontal = dimens.pagePadding, vertical = 8.dp),
+            contentPadding = PaddingValues(horizontal = dimens.pagePadding, vertical = if (LocalIsTv.current) 16.dp else 4.dp),
             horizontalArrangement = Arrangement.spacedBy(dimens.gridSpacing),
+            verticalAlignment = Alignment.Top,
             content = content,
         )
     }

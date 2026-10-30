@@ -43,9 +43,10 @@ data class Dimens(
     val gridSpacing: Dp,
 )
 
-val PhoneDimens = Dimens(16.dp, 116.dp, 240.dp, 16.dp, 420.dp, 30, 72.dp, 12.dp)
-val TabletDimens = Dimens(28.dp, 140.dp, 280.dp, 18.dp, 480.dp, 40, 80.dp, 18.dp)
-val TvDimens = Dimens(48.dp, 140.dp, 270.dp, 16.dp, 400.dp, 40, 80.dp, 22.dp)
+// The Apple app's Theme / FeaturedHero sizes: iOS (phone), macOS (tablet), tvOS (TV, 1920 pt ≈ 960 dp).
+val PhoneDimens = Dimens(24.dp, 140.dp, 280.dp, 20.dp, 480.dp, 36, 76.dp, 16.dp)
+val TabletDimens = Dimens(24.dp, 140.dp, 280.dp, 20.dp, 520.dp, 46, 76.dp, 16.dp)
+val TvDimens = Dimens(40.dp, 125.dp, 220.dp, 14.dp, 430.dp, 36, 65.dp, 24.dp)
 
 /** True on Android TV / Google TV boxes: D-pad navigation, no touch, larger focus effects. */
 val LocalIsTv = staticCompositionLocalOf { false }
