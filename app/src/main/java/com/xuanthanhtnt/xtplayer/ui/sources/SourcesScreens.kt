@@ -222,7 +222,6 @@ fun BrowserScreen(serverID: String, path: String, title: String) {
             listing = RemoteFileSystems.make(credentials).list(path)
         } catch (e: Exception) {
             error = "Không mở được: ${e.message ?: e}"
-            RemoteFileSystemPool.reset(serverID)
         }
         loading = false
     }
@@ -289,7 +288,10 @@ fun BrowserScreen(serverID: String, path: String, title: String) {
                         Text(error.orEmpty(), color = XtColors.danger)
                     }
                     Spacer(Modifier.height(8.dp))
-                    Button(onClick = { reload++ }) { Text("Thử lại") }
+                    Button(onClick = {
+                        RemoteFileSystemPool.reset(serverID)
+                        reload++
+                    }) { Text("Thử lại") }
                 }
             }
             listing.isEmpty() -> item { EmptyText("Thư mục trống") }

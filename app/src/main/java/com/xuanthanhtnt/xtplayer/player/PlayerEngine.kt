@@ -228,7 +228,10 @@ class PlayerEngine(context: Context) {
         player = ExoPlayer.Builder(context, XtRenderersFactory(context, settings.audioPassthrough.value))
             .setTrackSelector(trackSelector)
             .setLoadControl(loadControl)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(XtDataSource.Factory(context)))
+            .setMediaSourceFactory(
+                DefaultMediaSourceFactory(XtDataSource.Factory(context))
+                    .setLoadErrorHandlingPolicy(androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy(8))
+            )
             .setAudioAttributes(
                 AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(),
                 true,

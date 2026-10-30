@@ -37,8 +37,9 @@ class SmbFileReader private constructor(
     private val cacheKey: String,
 ) {
     @Volatile
-    private var file: File = SmbConnections.openRead(server, path)
-    val size: Long = SmbConnections.size(file)
+    private var opened: SmbConnections.OpenFile = SmbConnections.openRead(server, path)
+    private val file: File get() = opened.file
+    val size: Long = SmbConnections.size(opened.file)
 
     private val lock = Any()
     private val blocks = object : LinkedHashMap<Long, ByteArray>(64, 0.75f, true) {
@@ -137,7 +138,9 @@ class SmbFileReader private constructor(
                     filled += n
                     TrafficMeter.add(n.toLong())
                 } catch (e: Exception) {
-                    if (closed || ++attempts > 3) throw e
+                    if (closed || ++attempts > 4) throw e
+                    // Give Wi-Fi / VPN a moment to come back before logging in again.
+                    Thread.sleep(minOf(400L * attempts, 2000L))
                     reopen(seen)
                 }
             }
@@ -153,13 +156,16 @@ class SmbFileReader private constructor(
         }
     }
 
-    /** The NAS dropped the session (long pause, sleep, Wi-Fi switch): log in again and re-open the file once. */
+    /**
+     * The connection died (NAS idle timeout, sleep, Wi-Fi switch): the first worker to notice replaces this reader's
+     * session and re-opens the file; the others just use the new handle.
+     */
     private fun reopen(seenGeneration: Int) {
         synchronized(reopenLock) {
             if (synchronized(lock) { generation } != seenGeneration) return
-            runCatching { file.close() }
-            SmbConnections.reset(server.id)
-            file = SmbConnections.openRead(server, path)
+            val stale = opened
+            SmbConnections.invalidate(server, stale.session)
+            opened = SmbConnections.openRead(server, path)
             synchronized(lock) { generation++ }
         }
     }
@@ -188,7 +194,7 @@ class SmbFileReader private constructor(
             blocks.clear()
             inflight.clear()
         }
-        runCatching { file.close() }
+        runCatching { file.closeNoWait() }
     }
 
     companion object {

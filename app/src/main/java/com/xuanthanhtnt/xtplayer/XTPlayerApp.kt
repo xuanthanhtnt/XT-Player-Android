@@ -54,11 +54,33 @@ object AppGraph {
     val trakt by lazy { TraktService() }
     val updates by lazy { UpdateChecker() }
 
+    private fun watchNetwork(app: Application) {
+        val connectivity = app.getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager ?: return
+        runCatching {
+            connectivity.registerDefaultNetworkCallback(object : android.net.ConnectivityManager.NetworkCallback() {
+                private var current: android.net.Network? = null
+
+                override fun onAvailable(network: android.net.Network) {
+                    if (current != null && current != network) com.xuanthanhtnt.xtplayer.network.SmbConnections.resetAll()
+                    current = network
+                }
+
+                override fun onLost(network: android.net.Network) {
+                    if (network == current) {
+                        current = null
+                        com.xuanthanhtnt.xtplayer.network.SmbConnections.resetAll()
+                    }
+                }
+            })
+        }
+    }
+
     fun init(app: Application) {
         context = app
         settings = AppSettings(app)
         secrets = SecureStore(app)
         db = AppDatabase.open(app)
+        watchNetwork(app)
         scope.launch(Dispatchers.IO) {
             ServerRegistry.preload()
             trakt.sync()
