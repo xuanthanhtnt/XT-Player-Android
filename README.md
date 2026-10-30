@@ -26,14 +26,14 @@
 | Android TV | Có trên màn hình chính (banner), điều khiển hoàn toàn bằng remote (D-pad, OK, ◀▶ tua, phím media), **khớp tần số quét** (Match Content) |
 | Ổ mạng | **SMB2/3** (liệt kê share, đọc trước 4 luồng + cache khối 1 MiB, tự kết nối lại khi NAS ngắt), **WebDAV** (HTTP/HTTPS, Basic/Digest, chứng chỉ tự ký), **tự tìm NAS** qua mDNS; ảnh thu nhỏ từng video khi duyệt thư mục; mật khẩu mã hoá bằng Android Keystore |
 | Thư viện | Quét thư mục NAS, nhận diện phim / tập, poster, backdrop, diễn viên, tóm tắt, tên & ảnh từng tập từ **TMDb**; không có trên TMDb thì lấy khung hình trong video làm ảnh bìa; Tiếp tục xem, Mới thêm, Phim, TV Shows, Chưa xem, Điểm cao, Thể loại, Tìm kiếm (không cần gõ dấu) |
-| Trình phát | Thanh điều khiển nổi, thanh tua (kéo / chạm / D-pad giữ để tua nhanh), bảng **Âm thanh · Phụ đề · Video · Thông tin**, phụ đề rời cạnh file trên NAS (.srt/.ass/.vtt), cỡ / vị trí / nền chữ, **tìm & tải phụ đề OpenSubtitles**, Up Next, tốc độ 0.5–2×, Fit / Fill / Stretch, chạm đúp để tua, picture-in-picture (điện thoại / tablet), MediaSession (phím media, Google Assistant) |
-| Trakt | Đăng nhập bằng mã (cả trên TV), scrobble, đồng bộ đã xem và điểm xem tiếp với các thiết bị khác (gồm XT-Player trên Apple TV / iPhone / Mac và Infuse) |
-| Mở tệp | Tệp trên máy / USB / thẻ nhớ (trình chọn tệp), URL http(s), "Mở bằng XT-Player" từ trình quản lý tệp / trình duyệt |
+| Trình phát | Giống bản Mac: nút Đóng / Xem từ đầu, thanh nổi (âm lượng · ⏮ ↺ ▶ ↻ ⏭ · ⚙︎ · cửa sổ nổi · khung hình), **ảnh xem trước khi tua**, thanh tua (kéo / chạm / D-pad giữ để tua nhanh), bảng **Âm thanh · Phụ đề · Video · Thông tin**, phụ đề rời cạnh file trên NAS (.srt/.ass/.vtt), cỡ / vị trí / nền chữ, **tìm & tải phụ đề OpenSubtitles**, Up Next, tốc độ 0.5–2×, Fit / Fill / Stretch, chạm đúp để tua, picture-in-picture (điện thoại / tablet), MediaSession (phím media, Google Assistant) |
+| Trakt | Đăng nhập bằng **tài khoản Trakt** qua mã trên trakt.tv/activate (cả trên TV), scrobble, đồng bộ đã xem và điểm xem tiếp với các thiết bị khác (gồm XT-Player trên Apple TV / iPhone / Mac và Infuse) |
+| Thiết bị này | Duyệt bộ nhớ trong, thẻ nhớ, USB ngay trong app (có nút Quay lại, ảnh thu nhỏ), thêm thư mục vào thư viện như NAS; ngoài ra mở tệp bằng trình chọn tệp, URL http(s), "Mở bằng XT-Player" từ ứng dụng khác |
 | Cập nhật | Tự kiểm tra GitHub Releases mỗi ngày, tải APK và mở trình cài đặt của Android |
 
 ### Khác bản Apple
 
-- Chưa có: chương (chapter) của MKV, lệch phụ đề / lệch tiếng, ảnh xem trước khi tua, AirPlay (Android tương đương là Chromecast — để sau).
+- Chưa có: chương (chapter) của MKV, lệch phụ đề / lệch tiếng, AirPlay (Android tương đương là Chromecast — để sau).
 - Phụ đề ASS hiển thị kiểu cơ bản (ExoPlayer chưa có libass như libmpv).
 - Một số định dạng cũ (WMV, RMVB, ISO, VOB) phụ thuộc thiết bị.
 
@@ -50,7 +50,7 @@ Yêu cầu Android 8.0 trở lên.
 
 - **TMDb**: lấy khoá miễn phí tại themoviedb.org ▸ Settings ▸ API, nhập vào **Cài đặt ▸ Thư viện** (nhận cả API key v3 lẫn Read Access Token v4).
 - **OpenSubtitles**: API key tại opensubtitles.com ▸ Profile ▸ API Consumers → **Cài đặt ▸ Phụ đề trực tuyến**.
-- **Trakt**: tạo ứng dụng tại trakt.tv/oauth/applications/new (Redirect URI `http://localhost`), dán Client ID vào **Cài đặt ▸ Trakt**, bấm **Kết nối Trakt** rồi nhập mã tại trakt.tv/activate.
+- **Trakt**: **Cài đặt ▸ Trakt ▸ Kết nối Trakt**, mở trakt.tv/activate trên điện thoại / máy tính, đăng nhập tài khoản và nhập mã. Ứng dụng Trakt (Client ID) được nhúng sẵn khi build nhờ secret `TRAKT_CLIENT_ID` (cùng giá trị với bản Apple); bản build không có secret này thì nhập Client ID riêng ở mục *Nâng cao*.
 
 CI có thể nhúng sẵn khoá qua GitHub secrets `TMDB_API_KEY`, `OPENSUBTITLES_API_KEY`, `TRAKT_CLIENT_ID`, `TRAKT_CLIENT_SECRET` (khoá khi đó nằm trong APK công khai — chỉ dùng khoá cá nhân).
 
