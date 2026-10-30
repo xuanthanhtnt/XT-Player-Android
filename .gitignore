@@ -1,0 +1,21 @@
+# Gradle / Android Studio
+.gradle/
+build/
+local.properties
+.idea/
+*.iml
+captures/
+.externalNativeBuild/
+.cxx/
+.kotlin/
+
+# Signing (never commit keys)
+*.jks
+*.keystore
+keystore.properties
+
+# The original iOS / macOS / tvOS project, kept locally for reference only
+ios-reference/
+
+# macOS
+.DS_Store
