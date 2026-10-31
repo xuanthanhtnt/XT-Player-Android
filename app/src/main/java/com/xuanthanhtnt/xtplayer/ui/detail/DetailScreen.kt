@@ -265,7 +265,7 @@ private fun Hero(item: LibraryItem, files: List<LibraryFile>, seasons: List<Int>
                         }
                     }
                 }
-                HeroButton(if (refreshing) "Đang tải…" else "Làm mới", Icons.Filled.Refresh, primary = false) {
+                if (item.kind == LibraryKind.MOVIE || item.kind == LibraryKind.SHOW) HeroButton(if (refreshing) "Đang tải…" else "Làm mới", Icons.Filled.Refresh, primary = false) {
                     if (!refreshing) {
                         refreshing = true
                         actions.scope.launch {

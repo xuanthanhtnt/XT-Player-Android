@@ -81,6 +81,7 @@ object MediaLibrary {
     // Maintenance
 
     suspend fun removeFolder(folder: LibraryFolder) {
+        LibraryFolderKind.set(null, folder.key)
         dao.deleteFilesOfFolder(folder.key)
         dao.deleteFolder(folder.key)
         dao.deleteOrphanItems()
@@ -134,10 +135,20 @@ class LibraryIndex(files: List<LibraryFile>, entries: List<MediaEntry>) {
 
     data class Progress(val progress: Double?, val watched: Boolean)
 
+    /**
+     * "Unwatched": a film never played (in progress counts as played, as in Infuse); a show with an episode
+     * not played yet.
+     */
+    fun isUnplayed(item: LibraryItem): Boolean {
+        val files = filesByItem[item.key].orEmpty()
+        val unplayed: (LibraryFile) -> Boolean = { entriesByKey[it.key]?.isStarted != true }
+        return if (item.kind == LibraryKind.SHOW) files.any(unplayed) else files.all(unplayed)
+    }
+
     fun progress(item: LibraryItem): Progress {
         val files = filesByItem[item.key].orEmpty()
         val mine = files.mapNotNull { entriesByKey[it.key] }
-        if (item.kind == LibraryKind.MOVIE) {
+        if (item.kind == LibraryKind.MOVIE || item.kind == LibraryKind.MUSIC_VIDEO) {
             val best = mine.maxByOrNull { it.progress ?: 0.0 }
             return Progress(if (best?.resumePosition != null) best.progress else null, best?.isWatched ?: false)
         }

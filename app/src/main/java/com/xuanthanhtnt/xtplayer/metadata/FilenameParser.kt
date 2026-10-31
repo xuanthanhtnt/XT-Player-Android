@@ -40,7 +40,48 @@ object FilenameParser {
         "3gp",
     )
 
+    /**
+     * Music and audio-only tracks: lossless and hi-res (FLAC, ALAC, WAV / AIFF / Wave64, DSD, WavPack, APE, TTA,
+     * TAK), lossy, and raw Blu-ray / DVD-Audio tracks (DTS-HD, TrueHD, MLP).
+     */
+    val audioExtensions = setOf(
+        "flac", "m4a", "alac", "wav", "aif", "aiff", "aifc", "caf", "w64", "dsf", "dff", "wv", "ape", "tta", "tak",
+        "mp3", "aac", "ogg", "oga", "opus", "wma", "mpc", "shn", "mka", "mp2",
+        "ac3", "eac3", "ec3", "dts", "dtshd", "thd", "truehd", "mlp",
+    )
+
     val subtitleExtensions = setOf("srt", "ass", "ssa", "vtt", "sub", "sup", "idx", "smi")
+
+    data class Track(val disc: Int?, val number: Int?, val title: String)
+
+    private val trackPatterns = listOf(
+        Regex("""^\s*(\d{1,2})[-.](\d{1,3})[\s.\-]+(.+)$"""),        // 1-03 Title, 1.03 Title
+        Regex("""^\s*(\d{1,3})\s*[.\-)]?\s+(.+)$"""),                 // 03 Title, 03. Title, 03 - Title
+        Regex("""^.+?\s-\s(\d{1,3})\s-\s(.+)$"""),                    // Artist - 04 - Title
+    )
+
+    /** "01 - Song.flac", "1-03 Song.flac", "03. Song.dsf", "Artist - 04 - Song.mp3" → (disc, track, title). */
+    fun track(rawName: String): Track {
+        val stem = if (rawName.contains('.')) rawName.substringBeforeLast('.') else rawName
+        var name = stem.replace('_', ' ')
+        var disc: Int? = null
+        var number: Int? = null
+        for ((i, pattern) in trackPatterns.withIndex()) {
+            val match = pattern.find(name) ?: continue
+            val groups = match.groupValues
+            if (i == 0) {
+                disc = groups[1].toIntOrNull()
+                number = groups[2].toIntOrNull()
+                name = groups[3]
+            } else {
+                number = groups[1].toIntOrNull()
+                name = groups[2]
+            }
+            break
+        }
+        val title = name.trim { it == ' ' || it == '-' || it == '.' || it.isWhitespace() }
+        return Track(disc, number, title.ifEmpty { stem })
+    }
 
     private val episodePattern =
         Regex("""(?i)(?:^|[\s._\-\[(])s(\d{1,2})[\s._\-]?e(\d{1,3})(?:[\s._\-]?e\d{1,3})*(?=$|[\s._\-\])])""")

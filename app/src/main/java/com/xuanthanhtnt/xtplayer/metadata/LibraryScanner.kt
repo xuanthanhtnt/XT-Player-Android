@@ -3,6 +3,7 @@ package com.xuanthanhtnt.xtplayer.metadata
 import com.xuanthanhtnt.xtplayer.AppGraph
 import com.xuanthanhtnt.xtplayer.data.LibraryFile
 import com.xuanthanhtnt.xtplayer.data.LibraryFolder
+import com.xuanthanhtnt.xtplayer.data.LibraryFolderKind
 import com.xuanthanhtnt.xtplayer.data.LibraryItem
 import com.xuanthanhtnt.xtplayer.data.LibraryKind
 import com.xuanthanhtnt.xtplayer.data.MediaEntry
@@ -58,8 +59,9 @@ class LibraryScanner {
             error.value = null
             statusText.value = "Đang quét ${folder.name}…"
 
+            val kind = LibraryFolderKind.of(folder.key)
             val found = try {
-                collect(RemoteFileSystems.make(server), folder.path) { count ->
+                collect(RemoteFileSystems.make(server), folder.path, audio = kind == LibraryFolderKind.MUSIC) { count ->
                     statusText.value = "Đang quét ${folder.name}: $count tệp…"
                 }
             } catch (e: Exception) {
@@ -68,57 +70,12 @@ class LibraryScanner {
                 return@withContext
             }
 
-            val tmdb = TmdbClient.current()
-            val showCache = mutableMapOf<String, LibraryItem>()
-            val movieCache = mutableMapOf<String, LibraryItem>()
             val seenKeys = mutableSetOf<String>()
-            val files = mutableListOf<LibraryFile>()
-            found.forEachIndexed { index, entry ->
-                statusText.value = "Nhận diện ${index + 1}/${found.size}…"
-                val parsed = recognise(entry.item.name, entry.parentName)
-                val fileKey = RemoteFileSystems.key(server, entry.item.path)
-                seenKeys.add(fileKey)
-
-                val item = when (parsed.kind) {
-                    is ParsedMediaName.Kind.Episode -> showCache.getOrPut(parsed.title.lowercase()) {
-                        upsertItem(LibraryKind.SHOW, parsed, tmdb)
-                    }
-                    ParsedMediaName.Kind.Movie -> movieCache.getOrPut("${parsed.title.lowercase()}|${parsed.year ?: 0}") {
-                        upsertItem(LibraryKind.MOVIE, parsed, tmdb)
-                    }
-                }
-                val existing = dao.file(fileKey)
-                val episode = parsed.kind as? ParsedMediaName.Kind.Episode
-                files += (existing ?: LibraryFile(
-                    key = fileKey, itemKey = item.key, folderKey = folder.key, serverID = server.id,
-                    path = entry.item.path, fileName = entry.item.name, size = entry.item.size,
-                )).copy(
-                    itemKey = item.key,
-                    size = entry.item.size,
-                    subtitlePaths = entry.subtitles,
-                    // Keep a resolution learned from playback when the name has none.
-                    badges = if (parsed.badges.isEmpty() && existing != null) existing.badges else parsed.badges,
-                    season = episode?.season ?: existing?.season,
-                    episode = episode?.episode ?: existing?.episode,
-                )
-            }
-            dao.upsertFiles(files)
-
-            // Episode titles and stills, one TMDb request per season.
-            if (tmdb != null) {
-                for (show in showCache.values) {
-                    val id = show.tmdbID ?: continue
-                    val showFiles = dao.filesOfItem(show.key)
-                    for (number in showFiles.mapNotNull { it.season }.toSortedSet()) {
-                        statusText.value = "Tải thông tin ${show.title} mùa $number…"
-                        val season = runCatching { tmdb.season(id, number) }.getOrNull() ?: continue
-                        val byEpisode = season.episodes.associateBy { it.episodeNumber }
-                        dao.upsertFiles(showFiles.filter { it.season == number }.mapNotNull { file ->
-                            val info = file.episode?.let { byEpisode[it] } ?: return@mapNotNull null
-                            file.copy(episodeTitle = info.name, episodeOverview = info.overview, stillPath = info.stillPath, airDate = info.airDate)
-                        })
-                    }
-                }
+            when (kind) {
+                LibraryFolderKind.FILMS -> recogniseFilms(found, folder, server, seenKeys)
+                LibraryFolderKind.MUSIC_VIDEOS -> recogniseMusicVideos(found, folder, server, seenKeys)
+                // Albums of tracks arrive with the music player (parity step 2); the tracks are counted meanwhile.
+                LibraryFolderKind.MUSIC -> Unit
             }
 
             // Files that disappeared from this folder.
@@ -132,6 +89,94 @@ class LibraryScanner {
             scanning.value = false
         }
         AppGraph.scope.launch { generateMissingArtwork() }
+        // New library files may be ones Trakt already has as watched.
+        AppGraph.scope.launch { AppGraph.trakt.sync() }
+    }
+
+    /** Movies and episodes: recognised from names, enriched from TMDb. */
+    private suspend fun recogniseFilms(found: List<Found>, folder: LibraryFolder, server: ServerCredentials, seenKeys: MutableSet<String>) {
+        val tmdb = TmdbClient.current()
+        val showCache = mutableMapOf<String, LibraryItem>()
+        val movieCache = mutableMapOf<String, LibraryItem>()
+        val files = mutableListOf<LibraryFile>()
+        found.forEachIndexed { index, entry ->
+            statusText.value = "Nhận diện ${index + 1}/${found.size}…"
+            val parsed = recognise(entry.item.name, entry.parentName)
+            val fileKey = RemoteFileSystems.key(server, entry.item.path)
+            seenKeys.add(fileKey)
+
+            val item = when (parsed.kind) {
+                is ParsedMediaName.Kind.Episode -> showCache.getOrPut(parsed.title.lowercase()) {
+                    upsertItem(LibraryKind.SHOW, parsed, tmdb)
+                }
+                ParsedMediaName.Kind.Movie -> movieCache.getOrPut("${parsed.title.lowercase()}|${parsed.year ?: 0}") {
+                    upsertItem(LibraryKind.MOVIE, parsed, tmdb)
+                }
+            }
+            val existing = dao.file(fileKey)
+            val episode = parsed.kind as? ParsedMediaName.Kind.Episode
+            files += (existing ?: LibraryFile(
+                key = fileKey, itemKey = item.key, folderKey = folder.key, serverID = server.id,
+                path = entry.item.path, fileName = entry.item.name, size = entry.item.size,
+            )).copy(
+                itemKey = item.key,
+                size = entry.item.size,
+                subtitlePaths = entry.subtitles,
+                // Keep a resolution learned from playback when the name has none.
+                badges = if (parsed.badges.isEmpty() && existing != null) existing.badges else parsed.badges,
+                season = episode?.season ?: existing?.season,
+                episode = episode?.episode ?: existing?.episode,
+            )
+        }
+        dao.upsertFiles(files)
+
+        // Episode titles and stills, one TMDb request per season.
+        if (tmdb != null) {
+            for (show in showCache.values) {
+                val id = show.tmdbID ?: continue
+                val showFiles = dao.filesOfItem(show.key)
+                for (number in showFiles.mapNotNull { it.season }.toSortedSet()) {
+                    statusText.value = "Tải thông tin ${show.title} mùa $number…"
+                    val season = runCatching { tmdb.season(id, number) }.getOrNull() ?: continue
+                    val byEpisode = season.episodes.associateBy { it.episodeNumber }
+                    dao.upsertFiles(showFiles.filter { it.season == number }.mapNotNull { file ->
+                        val info = file.episode?.let { byEpisode[it] } ?: return@mapNotNull null
+                        file.copy(episodeTitle = info.name, episodeOverview = info.overview, stillPath = info.stillPath, airDate = info.airDate)
+                    })
+                }
+            }
+        }
+
+    }
+
+    /**
+     * One item per file, titled from its name, artist / show from its folder; no TMDb or Trakt lookup (a concert
+     * would otherwise turn into an unrelated film). Artwork is a frame of the video.
+     */
+    private suspend fun recogniseMusicVideos(found: List<Found>, folder: LibraryFolder, server: ServerCredentials, seenKeys: MutableSet<String>) {
+        found.forEachIndexed { index, entry ->
+            statusText.value = "Nhận diện ${index + 1}/${found.size}…"
+            val fileKey = RemoteFileSystems.key(server, entry.item.path)
+            seenKeys.add(fileKey)
+            val info = musicVideoInfo(entry.item.name, entry.item.baseName, entry.parentName, folder.name)
+            val key = "musicvideo:$fileKey"
+            val existing = dao.item(key)
+            val item = (existing?.copy(kindRaw = LibraryKind.MUSIC_VIDEO.raw)
+                ?: LibraryItem(key = key, kindRaw = LibraryKind.MUSIC_VIDEO.raw, title = info.title, year = null))
+                .let { it.copy(year = info.year ?: it.year, tagline = info.artist) }
+            dao.upsertItem(item)
+            val file = (dao.file(fileKey) ?: LibraryFile(
+                key = fileKey, itemKey = item.key, folderKey = folder.key, serverID = server.id,
+                path = entry.item.path, fileName = entry.item.name, size = entry.item.size,
+            )).copy(
+                itemKey = item.key,
+                folderKey = folder.key,
+                size = entry.item.size,
+                subtitlePaths = entry.subtitles,
+                badges = FilenameParser.parse(entry.item.name).badges,
+            )
+            dao.upsertFile(file)
+        }
     }
 
     /**
@@ -212,6 +257,15 @@ class LibraryScanner {
         )
         private const val MAX_DEPTH = 7
 
+        data class MusicVideoInfo(val title: String, val year: Int?, val artist: String?)
+
+        /** A music video's title (from the file name, at least two characters), year, and artist / show (its folder). */
+        fun musicVideoInfo(fileName: String, baseName: String, parentName: String, folderName: String): MusicVideoInfo {
+            val parsed = FilenameParser.parse(fileName)
+            val title = if (parsed.title.length >= 2) parsed.title else baseName
+            return MusicVideoInfo(title, parsed.year, if (parentName == folderName) null else parentName)
+        }
+
         fun recognise(fileName: String, parentFolder: String): ParsedMediaName {
             var parsed = FilenameParser.parse(fileName)
             if (parsed.kind == ParsedMediaName.Kind.Movie) {
@@ -229,7 +283,8 @@ class LibraryScanner {
         }
     }
 
-    private suspend fun collect(fs: RemoteFileSystem, root: String, progress: (Int) -> Unit): List<Found> {
+    /** Video files (with their subtitles), or audio tracks for music folders. */
+    private suspend fun collect(fs: RemoteFileSystem, root: String, audio: Boolean = false, progress: (Int) -> Unit): List<Found> {
         val results = mutableListOf<Found>()
         val queue = ArrayDeque<Triple<String, Int, String>>()
         queue.add(Triple(root, 0, root.trimEnd('/').substringAfterLast('/')))
@@ -242,8 +297,11 @@ class LibraryScanner {
                 if (depth == 0) throw e
                 continue
             }
+            if (audio) {
+                for (track in items.filter { it.isAudio }) results += Found(track, name, emptyList())
+            }
             val subtitles = items.filter { it.isSubtitle }
-            val videos = items.filter { it.isVideo }
+            val videos = if (audio) emptyList() else items.filter { it.isVideo }
             // A "Season 01" folder inherits its show's name.
             val lower = name.lowercase()
             val parent = if (lower.startsWith("season") || lower.startsWith("mùa")) showFolderName[path] ?: name else name

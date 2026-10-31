@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.MusicVideo
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
@@ -112,6 +113,7 @@ enum class Section(val route: String, val label: String, val icon: ImageVector, 
     UNWATCHED("unwatched", "Chưa xem", Icons.Filled.VisibilityOff, false),
     TOP_RATED("toprated", "Điểm cao", Icons.Filled.Star, false),
     GENRES("genres", "Thể loại", Icons.Filled.TheaterComedy, false),
+    MUSIC_VIDEOS("musicvideos", "Video ca nhạc", Icons.Filled.MusicVideo, false),
     SOURCES("sources", "Nguồn", Icons.Filled.Storage, true),
     SETTINGS("settings", "Cài đặt", Icons.Filled.Settings, true),
 }
@@ -303,6 +305,7 @@ private fun AppNavHost(nav: NavHostController) {
         composable(Section.UNWATCHED.route) { LibraryGridScreen(LibraryFilter.UNWATCHED) }
         composable(Section.TOP_RATED.route) { LibraryGridScreen(LibraryFilter.TOP_RATED) }
         composable(Section.GENRES.route) { GenresScreen() }
+        composable(Section.MUSIC_VIDEOS.route) { com.xuanthanhtnt.xtplayer.ui.library.MusicVideosScreen() }
         composable(Section.SOURCES.route) { SourcesScreen() }
         composable(Section.SETTINGS.route) { SettingsScreen() }
         composable("grid/{filter}") { entry ->
@@ -360,6 +363,10 @@ private fun SideBar(nav: NavHostController, isTv: Boolean) {
         SideHeader("Thư viện")
         for (section in listOf(Section.MOVIES, Section.SHOWS, Section.RECENT, Section.UNWATCHED, Section.TOP_RATED, Section.GENRES)) {
             SideItem(section.icon, section.label, route == section.route) { actions.openSection(section.route) }
+        }
+        SideHeader("Âm nhạc")
+        SideItem(Section.MUSIC_VIDEOS.icon, Section.MUSIC_VIDEOS.label, route == Section.MUSIC_VIDEOS.route) {
+            actions.openSection(Section.MUSIC_VIDEOS.route)
         }
         SideHeader("Tệp")
         for (server in servers) {

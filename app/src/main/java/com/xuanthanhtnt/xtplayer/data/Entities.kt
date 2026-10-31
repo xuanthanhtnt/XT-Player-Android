@@ -56,7 +56,15 @@ data class LibraryFolder(
 }
 
 enum class LibraryKind(val raw: String) {
-    MOVIE("movie"), SHOW("show");
+    MOVIE("movie"),
+    SHOW("show"),
+    /** Concerts, music videos, live shows: kept out of Films and never looked up on TMDb / Trakt. */
+    MUSIC_VIDEO("musicVideo"),
+    /**
+     * A folder of audio tracks. Its files are the tracks: `episode` = track number, `season` = disc,
+     * `episodeTitle` = track title; the album artist is kept in `tagline` (see `artist`).
+     */
+    ALBUM("album");
 
     companion object {
         fun from(raw: String) = entries.firstOrNull { it.raw == raw } ?: MOVIE
@@ -85,6 +93,9 @@ data class LibraryItem(
     val updatedAt: Long = System.currentTimeMillis(),
 ) {
     val kind: LibraryKind get() = LibraryKind.from(kindRaw)
+
+    /** Album artist (albums keep it in `tagline`); music videos keep their folder (artist / show) there too. */
+    val artist: String? get() = if (kind == LibraryKind.ALBUM || kind == LibraryKind.MUSIC_VIDEO) tagline else null
 
     val castMembers: List<CastMember>
         get() = cast.mapNotNull { raw ->
@@ -154,7 +165,11 @@ data class MediaEntry(
 
     /** Where playback should start: resume unless the item was (nearly) finished. */
     val resumePosition: Double?
-        get() = if (position > 30 && (duration <= 0 || position < duration - 60)) position else null
+        get() = if (position > 30 && !isWatched) position else null
 
-    val isWatched: Boolean get() = duration > 0 && position >= duration - 60
+    /** Finished: the last minute reached, or 90 % (end credits of a film, the outro of a music video). */
+    val isWatched: Boolean get() = duration > 0 && (position >= duration - 60 || position >= duration * 0.9)
+
+    /** Opened and played for a while, finished or not ("Unwatched" leaves these out, like Infuse). */
+    val isStarted: Boolean get() = position > 10 || isWatched
 }

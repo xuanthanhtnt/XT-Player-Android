@@ -85,6 +85,16 @@ object AppGraph {
             ServerRegistry.preload()
             trakt.sync()
             scanner.generateMissingArtwork()
+            while (true) {
+                kotlinx.coroutines.delay(900_000)
+                if (!com.xuanthanhtnt.xtplayer.player.PlayerLauncher.isOpen) trakt.syncIfStale(600)
+            }
         }
+        // Watched elsewhere (Infuse, Apple TV, the Mac) while this app sat in the background.
+        androidx.lifecycle.ProcessLifecycleOwner.get().lifecycle.addObserver(object : androidx.lifecycle.DefaultLifecycleObserver {
+            override fun onStart(owner: androidx.lifecycle.LifecycleOwner) {
+                scope.launch { trakt.syncIfStale(300) }
+            }
+        })
     }
 }

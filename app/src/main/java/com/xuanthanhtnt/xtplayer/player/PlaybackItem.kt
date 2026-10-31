@@ -45,6 +45,10 @@ object PlayerLauncher {
     @Volatile
     var pending: PlaybackSession? = null
 
+    /** A player is on screen (or in picture-in-picture): the periodic Trakt sync waits. */
+    @Volatile
+    var isOpen = false
+
     fun play(context: Context, session: PlaybackSession) {
         if (session.items.isEmpty()) return
         session.items.mapNotNull { it.server }.forEach(ServerRegistry::register)

@@ -25,6 +25,11 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddCircle
 import androidx.compose.material.icons.filled.Dns
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.LibraryMusic
+import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.MusicVideo
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Language
@@ -66,6 +71,7 @@ import com.xuanthanhtnt.xtplayer.AppGraph
 import com.xuanthanhtnt.xtplayer.core.ByteFormat
 import com.xuanthanhtnt.xtplayer.core.NaturalOrder
 import com.xuanthanhtnt.xtplayer.data.LibraryFolder
+import com.xuanthanhtnt.xtplayer.data.LibraryFolderKind
 import com.xuanthanhtnt.xtplayer.data.MediaLibrary
 import com.xuanthanhtnt.xtplayer.data.MediaServer
 import com.xuanthanhtnt.xtplayer.metadata.FilenameParser
@@ -157,7 +163,7 @@ fun SourcesScreen() {
         items(folders, key = { it.key }) { folder ->
             val serverName = servers.firstOrNull { it.id == folder.serverID }?.name.orEmpty()
             SourceCard(
-                icon = Icons.Filled.Folder,
+                icon = kindIcon(LibraryFolderKind.of(folder.key)),
                 title = folder.name,
                 subtitle = folderDetail(folder, serverName),
                 onLongClick = { menuFolder = folder },
@@ -175,12 +181,18 @@ fun SourcesScreen() {
         ) { menuServer = null }
     }
     menuFolder?.let { folder ->
+        val current = LibraryFolderKind.of(folder.key)
         ActionsDialog(
             folder.name,
-            listOf(
-                "Quét lại" to { AppGraph.scanner.scanInBackground(folder) },
-                "Bỏ khỏi thư viện" to { actions.scope.launch { MediaLibrary.removeFolder(folder) }; Unit },
-            ),
+            listOf("Quét lại" to { AppGraph.scanner.scanInBackground(folder) }) +
+                // "Loại thư mục": changing it rescans the folder with the new recognition.
+                LibraryFolderKind.entries.map { kind ->
+                    "Loại thư mục: ${kind.label}${if (kind == current) " ✓" else ""}" to {
+                        LibraryFolderKind.set(kind, folder.key)
+                        AppGraph.scanner.scanInBackground(folder)
+                    }
+                } +
+                listOf("Bỏ khỏi thư viện" to { actions.scope.launch { MediaLibrary.removeFolder(folder) }; Unit }),
         ) { menuFolder = null }
     }
 }
@@ -190,9 +202,17 @@ private fun SectionLabel(text: String) {
     Text(text, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = 12.dp, bottom = 2.dp))
 }
 
+private fun kindIcon(kind: LibraryFolderKind) = when (kind) {
+    LibraryFolderKind.FILMS -> Icons.Filled.Movie
+    LibraryFolderKind.MUSIC_VIDEOS -> Icons.Filled.MusicVideo
+    LibraryFolderKind.MUSIC -> Icons.Filled.LibraryMusic
+}
+
 private fun folderDetail(folder: LibraryFolder, serverName: String): String {
     val scanned = folder.lastScan?.let { DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(it)) }
-    return listOfNotNull(serverName.takeIf { it.isNotEmpty() }, "${folder.fileCount} tệp", scanned?.let { "quét lúc $it" }).joinToString(" · ") +
+    return listOfNotNull(
+        LibraryFolderKind.of(folder.key).label, serverName.takeIf { it.isNotEmpty() }, "${folder.fileCount} tệp", scanned?.let { "quét lúc $it" },
+    ).joinToString(" · ") +
         "\nGiữ (nhấn lâu) để quét lại hoặc bỏ khỏi thư viện"
 }
 
@@ -228,6 +248,9 @@ fun BrowserScreen(serverID: String, path: String, title: String) {
 
     val directories = remember(listing) { listing.filter { it.isDirectory }.sortedWith { a, b -> NaturalOrder.compare(a.name, b.name) } }
     val videos = remember(listing) { listing.filter { it.isVideo }.sortedWith { a, b -> NaturalOrder.compare(a.name, b.name) } }
+    val music = remember(listing) { listing.filter { it.isAudio }.sortedWith { a, b -> NaturalOrder.compare(a.name, b.name) } }
+    val suggestedKind = remember(listing, title) { LibraryFolderKind.guess(title, listing) }
+    var choosingKind by remember { mutableStateOf(false) }
     val subtitles = remember(listing) { listing.filter { it.isSubtitle } }
     val libraryFolder = folders.firstOrNull { it.serverID == serverID && it.path == path }
 
@@ -243,23 +266,48 @@ fun BrowserScreen(serverID: String, path: String, title: String) {
         if (path.isNotEmpty()) {
             item {
                 Column(Modifier.padding(horizontal = dimens.pagePadding)) {
-                    Row(
-                        Modifier
-                            .focusClickable(RoundedCornerShape(12.dp), focusScale = 1.03f) {
-                                if (scanning) return@focusClickable
-                                actions.scope.launch {
-                                    val folder = libraryFolder ?: LibraryFolder(LibraryFolder.key(serverID, path), serverID, path, title)
-                                        .also { dao.upsertFolder(it) }
-                                    AppGraph.scanner.scanInBackground(folder)
+                    // The folder's type decides how it is recognised: films via TMDb, music videos by file name,
+                    // music as albums of tracks.
+                    fun addToLibrary(kind: LibraryFolderKind?) {
+                        if (scanning) return
+                        actions.scope.launch {
+                            val folder = libraryFolder ?: LibraryFolder(LibraryFolder.key(serverID, path), serverID, path, title)
+                                .also { dao.upsertFolder(it) }
+                            if (kind != null) LibraryFolderKind.set(kind, folder.key)
+                            AppGraph.scanner.scanInBackground(folder)
+                        }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            Modifier
+                                .focusClickable(RoundedCornerShape(12.dp), focusScale = 1.03f) {
+                                    addToLibrary(if (libraryFolder != null) null else suggestedKind)
                                 }
-                            }
-                            .glassPanel(12.dp)
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(if (libraryFolder != null) Icons.Filled.Sync else Icons.Filled.LibraryAdd, null, tint = XtColors.leaf)
-                        Spacer(Modifier.width(10.dp))
-                        Text(if (libraryFolder != null) "Đã có trong thư viện — quét lại" else "Thêm thư mục này vào thư viện")
+                                .glassPanel(12.dp)
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(if (libraryFolder != null) Icons.Filled.Sync else Icons.Filled.LibraryAdd, null, tint = XtColors.leaf)
+                            Spacer(Modifier.width(10.dp))
+                            Text(
+                                if (libraryFolder != null) "Đã có trong thư viện (${LibraryFolderKind.of(libraryFolder.key).label}) — quét lại"
+                                else "Thêm thư mục này vào thư viện (gợi ý: ${suggestedKind.label})"
+                            )
+                        }
+                        if (libraryFolder == null) {
+                            Row(
+                                Modifier
+                                    .focusClickable(RoundedCornerShape(12.dp), focusScale = 1.05f) { choosingKind = true }
+                                    .glassPanel(12.dp)
+                                    .padding(12.dp),
+                            ) { Icon(Icons.Filled.ExpandMore, "Chọn loại thư mục", tint = XtColors.leaf) }
+                        }
+                    }
+                    if (choosingKind) {
+                        com.xuanthanhtnt.xtplayer.ui.ActionsDialog(
+                            "Thêm vào thư viện dưới dạng",
+                            LibraryFolderKind.entries.map { kind -> kind.label to { addToLibrary(kind) } },
+                        ) { choosingKind = false }
                     }
                     if (scanning || status.isNotEmpty() || scanError != null) {
                         Text(
@@ -312,21 +360,48 @@ fun BrowserScreen(serverID: String, path: String, title: String) {
                 },
             ) { actions.openBrowser(serverID, dir.path, dir.name) }
         }
+        // Videos and music in their own sections; each plays as its own queue.
+        fun play(item: RemoteItem, files: List<RemoteItem>) {
+            val credentials = server ?: return
+            actions.scope.launch {
+                val queue = PlaybackFactory.remote(files, subtitles, credentials)
+                val start = files.indexOf(item).coerceAtLeast(0)
+                if (queue.isNotEmpty()) actions.play(PlaybackSession(queue, start))
+            }
+        }
+        if (videos.isNotEmpty() && music.isNotEmpty()) item { BrowserSection("Video") }
         items(videos, key = { "v:" + it.path }) { video ->
             BrowserRow(
                 title = video.name,
                 detail = (listOf(ByteFormat.file(video.size)) + FilenameParser.parse(video.name).badges).joinToString(" · "),
                 leading = { server?.let { BrowserThumbnail(it, video) } },
-            ) {
-                val credentials = server ?: return@BrowserRow
-                actions.scope.launch {
-                    val queue = PlaybackFactory.remote(videos, subtitles, credentials)
-                    val start = videos.indexOf(video).coerceAtLeast(0)
-                    if (queue.isNotEmpty()) actions.play(PlaybackSession(queue, start))
-                }
-            }
+            ) { play(video, videos) }
+        }
+        if (videos.isNotEmpty() && music.isNotEmpty()) item { BrowserSection("Nhạc") }
+        items(music, key = { "a:" + it.path }) { track ->
+            BrowserRow(
+                title = FilenameParser.track(track.name).title,
+                detail = audioDetail(track),
+                leading = { Icon(Icons.Filled.MusicNote, null, tint = XtColors.leaf, modifier = Modifier.size(28.dp)) },
+            ) { play(track, music) }
         }
     }
+}
+
+/** "FLAC · 45 MB": format and size of a music file. */
+private fun audioDetail(item: RemoteItem): String {
+    val format = if (item.fileExtension == "dsf" || item.fileExtension == "dff") "DSD" else item.fileExtension.uppercase()
+    return format + " · " + ByteFormat.file(item.size)
+}
+
+@Composable
+private fun BrowserSection(title: String) {
+    Text(
+        title,
+        style = MaterialTheme.typography.titleMedium,
+        color = XtColors.leaf,
+        modifier = Modifier.padding(start = LocalDimens.current.pagePadding, top = 10.dp, bottom = 2.dp),
+    )
 }
 
 @Composable
