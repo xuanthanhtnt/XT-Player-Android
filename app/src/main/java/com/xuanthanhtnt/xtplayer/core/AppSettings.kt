@@ -61,6 +61,10 @@ class AppSettings(context: Context) {
     val hardwareDecoding = bool("player.hardwareDecoding", true)
     val subtitleLanguages = string("subtitles.languages", "vi,vie,en,eng")
     val audioLanguages = string("audio.languages", "")
+    /** Centre channel (or the stereo voice band) up against everything else. */
+    val dialogBoost = bool("audio.dialogBoost", false)
+    /** Quiet passages raised, explosions held back. */
+    val nightMode = bool("audio.nightMode", false)
     val subtitleScale = float("subtitles.scale", 1f)
     /** 100 = at the bottom, 94 = a little higher, 60 = middle of the screen. */
     val subtitlePosition = int("subtitles.position", 100)

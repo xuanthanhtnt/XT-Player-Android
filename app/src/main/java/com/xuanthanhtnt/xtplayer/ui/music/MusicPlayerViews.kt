@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -79,6 +80,7 @@ import com.xuanthanhtnt.xtplayer.ui.ActionsDialog
 import com.xuanthanhtnt.xtplayer.ui.ArtworkImage
 import com.xuanthanhtnt.xtplayer.ui.LocalAppActions
 import com.xuanthanhtnt.xtplayer.ui.focusClickable
+import com.xuanthanhtnt.xtplayer.ui.sources.SwitchRow
 import com.xuanthanhtnt.xtplayer.ui.theme.LocalIsTv
 import com.xuanthanhtnt.xtplayer.ui.theme.XtColors
 import kotlinx.coroutines.launch
@@ -225,6 +227,7 @@ private fun NowPlayingContent(item: PlaybackItem) {
     val isTv = LocalIsTv.current
     val density = LocalDensity.current
     var showsQueue by remember { mutableStateOf(false) }
+    var showsOptions by remember { mutableStateOf(false) }
     val playFocus = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { playFocus.requestFocus() } }
     Box(
@@ -282,13 +285,34 @@ private fun NowPlayingContent(item: PlaybackItem) {
                 Icon(Icons.Filled.KeyboardArrowDown, null, tint = Color.White, modifier = Modifier.size(18.dp))
                 Text("Thu nhỏ", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = Color.White)
             }
-            Box(Modifier.align(Alignment.TopEnd).padding(top = 16.dp, end = 20.dp)) {
+            if (showsOptions) AudioOptionsDialog { showsOptions = false }
+            Row(Modifier.align(Alignment.TopEnd).padding(top = 16.dp, end = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                MusicButton(Icons.Filled.Tune, "Xử lý âm thanh", 17.dp) { showsOptions = true }
                 MusicButton(Icons.AutoMirrored.Filled.QueueMusic, "Hàng đợi", 18.dp, tint = if (showsQueue) XtColors.leaf else Color.White) {
                     showsQueue = !showsQueue
                 }
             }
         }
     }
+}
+
+/** AudioOptionsMenu: the sound processing switches of Settings ▸ Âm thanh, applied to what is playing. */
+@Composable
+private fun AudioOptionsDialog(onDismiss: () -> Unit) {
+    val settings = com.xuanthanhtnt.xtplayer.AppGraph.settings
+    val dialog by settings.dialogBoost.collect()
+    val night by settings.nightMode.collect()
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Xử lý âm thanh", style = MaterialTheme.typography.titleMedium) },
+        text = {
+            Column {
+                SwitchRow("Tăng thoại", dialog, null) { settings.dialogBoost.value = it }
+                SwitchRow("Chế độ ban đêm", night, null) { settings.nightMode.value = it }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Đóng") } },
+    )
 }
 
 @Composable

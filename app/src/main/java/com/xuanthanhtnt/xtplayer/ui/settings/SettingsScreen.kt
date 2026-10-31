@@ -67,7 +67,7 @@ fun SettingsScreen() {
     ) {
         item { PageTitle("Cài đặt", inset = false) }
 
-        section("Phát lại", "Áp dụng cho lần phát tiếp theo.") {
+        section("Phát lại", "Giải mã phần cứng đổi ngay cho video đang phát; các mục khác áp dụng cho lần phát tiếp theo.") {
             PrefSwitch(
                 "Giải mã phần cứng", settings.hardwareDecoding,
                 "Bật (khuyên dùng): dùng chip giải mã của máy — mượt, mát, giữ HDR / Dolby Vision. Tắt khi một tệp bị sọc, " +
@@ -86,7 +86,15 @@ fun SettingsScreen() {
             PrefSwitch("Chế độ tunneled", settings.tunneling, "Một số Android TV đồng bộ hình / tiếng tốt hơn khi bitstream. Tắt nếu bị đen hình.")
         }
 
-        section("Âm thanh", "Bitstream chỉ có tác dụng khi ampli / TV qua HDMI nhận được định dạng đó; lúc bitstream, âm lượng chỉnh trên ampli.") {
+        section(
+            "Âm thanh",
+            "Tăng thoại: kênh giữa to hơn, kênh vòm và siêu trầm nhỏ lại (stereo: tách dải giọng nói). Ban đêm: nén dải động — " +
+                "tiếng nói nhỏ được nâng lên, tiếng nổ được giữ lại. Hai mục này đổi ngay cho nội dung đang phát. " +
+                "Bitstream chỉ có tác dụng khi ampli / TV qua HDMI nhận được định dạng đó; lúc bitstream, âm lượng chỉnh trên ampli " +
+                "và tăng thoại / ban đêm không áp dụng.",
+        ) {
+            PrefSwitch("Tăng thoại (nghe rõ lời nói)", settings.dialogBoost)
+            PrefSwitch("Chế độ ban đêm (nén dải động)", settings.nightMode)
             PrefSwitch("Bitstream TrueHD / DTS-HD / E-AC3 qua HDMI", settings.audioPassthrough)
             PrefText("Ngôn ngữ âm thanh ưu tiên (vd: vie,eng)", settings.audioLanguages)
         }
