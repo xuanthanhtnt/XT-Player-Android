@@ -16,6 +16,8 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.MusicVideo
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -98,8 +100,9 @@ private fun filtered(all: List<LibraryItem>, index: LibraryIndex, filter: Librar
     val list = when (filter) {
         LibraryFilter.MOVIES -> all.filter { it.kind == LibraryKind.MOVIE }
         LibraryFilter.SHOWS -> all.filter { it.kind == LibraryKind.SHOW }
-        LibraryFilter.RECENT -> return all.sortedByDescending { it.addedAt }.take(60)
-        LibraryFilter.UNWATCHED -> all.filter { index.isUnplayed(it) }
+        LibraryFilter.RECENT -> return all.filter { it.kind == LibraryKind.MOVIE || it.kind == LibraryKind.SHOW }
+            .sortedByDescending { it.addedAt }.take(60)
+        LibraryFilter.UNWATCHED -> all.filter { it.kind != LibraryKind.ALBUM && index.isUnplayed(it) }
         LibraryFilter.TOP_RATED -> all.filter { (it.rating ?: 0.0) > 0 }
     }
     return when (sort) {
@@ -200,3 +203,66 @@ fun SearchScreen() {
 
 private fun fold(text: String): String =
     Normalizer.normalize(text.lowercase(), Normalizer.Form.NFD).replace(Regex("\\p{Mn}+"), "").replace('đ', 'd')
+
+/** MusicViews.swift `MusicVideosView`: every music video, newest first or by artist / show. */
+@Composable
+fun MusicVideosScreen(embedded: Boolean = false) {
+    val dao = AppGraph.dao
+    val all by remember { dao.itemsFlow() }.collectAsState(initial = emptyList())
+    val files by remember { dao.filesFlow() }.collectAsState(initial = emptyList())
+    val entries by remember { dao.entriesFlow() }.collectAsState(initial = emptyList())
+    val index = remember(files, entries) { LibraryIndex(files, entries) }
+    var byArtist by rememberSaveable { mutableStateOf(false) }
+    val dimens = LocalDimens.current
+    val videos = remember(all, byArtist) {
+        val list = all.filter { it.kind == LibraryKind.MUSIC_VIDEO }
+        if (!byArtist) list else list.sortedWith(compareBy<LibraryItem>({ it.artist ?: "~" }, { it.title }))
+    }
+    LazyVerticalGrid(
+        columns = GridCells.Adaptive(dimens.landscapeWidth),
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = dimens.pagePadding, end = dimens.pagePadding, bottom = 32.dp),
+        horizontalArrangement = Arrangement.spacedBy(dimens.gridSpacing),
+        verticalArrangement = Arrangement.spacedBy(dimens.gridSpacing),
+    ) {
+        item(span = { GridItemSpan(maxLineSpan) }) {
+            Column {
+                if (!embedded) PageTitle("Video ca nhạc", inset = false)
+                if (videos.isEmpty()) {
+                    MusicEmptyHint(com.xuanthanhtnt.xtplayer.data.LibraryFolderKind.MUSIC_VIDEOS)
+                } else {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(bottom = 8.dp)) {
+                        SortChip("Mới thêm", !byArtist) { byArtist = false }
+                        SortChip("Nghệ sĩ / chương trình", byArtist) { byArtist = true }
+                    }
+                }
+            }
+        }
+        items(videos, key = { it.key }) { MusicVideoCard(it, index, Modifier.fillMaxWidth()) }
+    }
+}
+
+/** MusicViews.swift `MusicVideoLink`: a 16:9 card (artist / show under the title) that opens the detail page. */
+@Composable
+fun MusicVideoCard(item: LibraryItem, index: LibraryIndex, modifier: Modifier = Modifier) {
+    val actions = LocalAppActions.current
+    val state = index.progress(item)
+    androidx.compose.foundation.layout.Box(modifier) {
+        com.xuanthanhtnt.xtplayer.ui.LandscapeCard(
+            title = item.title,
+            subtitle = item.artist ?: item.year?.toString(),
+            imagePath = item.backdropPath,
+            progress = state.progress,
+            modifier = Modifier.fillMaxWidth(),
+            placeholderIcon = androidx.compose.material.icons.Icons.Filled.MusicVideo,
+        ) { actions.openDetail(item.key) }
+        if (state.watched) {
+            androidx.compose.material3.Icon(
+                androidx.compose.material.icons.Icons.Filled.CheckCircle, "Đã xem", tint = XtColors.leaf,
+                modifier = Modifier
+                    .align(androidx.compose.ui.Alignment.TopEnd)
+                    .padding(8.dp),
+            )
+        }
+    }
+}

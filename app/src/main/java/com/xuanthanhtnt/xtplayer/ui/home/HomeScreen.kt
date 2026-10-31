@@ -67,6 +67,7 @@ import com.xuanthanhtnt.xtplayer.data.LibraryKind
 import com.xuanthanhtnt.xtplayer.data.LibraryOrdering
 import com.xuanthanhtnt.xtplayer.data.MediaEntry
 import com.xuanthanhtnt.xtplayer.data.MediaLibrary
+import com.xuanthanhtnt.xtplayer.metadata.FilenameParser
 import com.xuanthanhtnt.xtplayer.ui.ActionsDialog
 import com.xuanthanhtnt.xtplayer.ui.ArtworkImage
 import com.xuanthanhtnt.xtplayer.ui.LandscapeCard
@@ -103,9 +104,15 @@ fun HomeScreen() {
     val dimens = LocalDimens.current
 
     val index = remember(files, entries) { LibraryIndex(files, entries) }
-    val continueWatching = remember(entries) { entries.filter { it.resumePosition != null }.take(16) }
+    // Films and episodes left half-watched (music is resumed from its album, not from here).
+    val continueWatching = remember(entries) {
+        entries.filter { it.resumePosition != null && it.uri.substringAfterLast('.', "").lowercase() !in FilenameParser.audioExtensions }.take(16)
+    }
+    val filmsAndShows = remember(items) { items.filter { it.kind == LibraryKind.MOVIE || it.kind == LibraryKind.SHOW } }
     val movies = remember(items) { items.filter { it.kind == LibraryKind.MOVIE } }
     val shows = remember(items) { items.filter { it.kind == LibraryKind.SHOW } }
+    val musicVideos = remember(items) { items.filter { it.kind == LibraryKind.MUSIC_VIDEO } }
+    val albums = remember(items) { items.filter { it.kind == LibraryKind.ALBUM } }
     val featured = remember(items, continueWatching, index) { featuredItems(items, continueWatching, index) }
     var featuredIndex by remember { mutableIntStateOf(0) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -185,10 +192,10 @@ fun HomeScreen() {
                 }
             }
         }
-        if (items.isNotEmpty()) {
+        if (filmsAndShows.isNotEmpty()) {
             item(key = "recent") {
                 ShelfRow("Mới thêm") {
-                    items(items.take(20), key = { it.key }) { posterItem(it, index) }
+                    items(filmsAndShows.take(20), key = { it.key }) { posterItem(it, index) }
                 }
             }
         }
@@ -203,6 +210,20 @@ fun HomeScreen() {
             item(key = "shows") {
                 ShelfRow("TV Shows", onSeeAll = { actions.openGrid(LibraryFilter.SHOWS) }) {
                     items(shows.take(24), key = { it.key }) { posterItem(it, index) }
+                }
+            }
+        }
+        if (musicVideos.isNotEmpty()) {
+            item(key = "musicVideos") {
+                ShelfRow("Video ca nhạc", onSeeAll = { actions.openSection(com.xuanthanhtnt.xtplayer.ui.Section.MUSIC_VIDEOS.route) }) {
+                    items(musicVideos.take(20), key = { it.key }) { com.xuanthanhtnt.xtplayer.ui.library.MusicVideoCard(it, index) }
+                }
+            }
+        }
+        if (albums.isNotEmpty()) {
+            item(key = "albums") {
+                ShelfRow("Nhạc", onSeeAll = { actions.openSection(com.xuanthanhtnt.xtplayer.ui.Section.MUSIC.route) }) {
+                    items(albums.take(20), key = { it.key }) { com.xuanthanhtnt.xtplayer.ui.library.AlbumLink(it, index) }
                 }
             }
         }
@@ -236,8 +257,9 @@ private fun featuredItems(items: List<LibraryItem>, continueWatching: List<Media
         val item = index.itemKey(entry.key)?.let { byKey[it] } ?: continue
         if (seen.add(item.key)) picked += item
     }
-    for (item in items) if (item.backdropPath != null && seen.add(item.key)) picked += item
-    if (picked.isEmpty()) items.firstOrNull()?.let { picked += it }
+    for (item in items) if (item.kind != LibraryKind.ALBUM && item.backdropPath != null && seen.add(item.key)) picked += item
+    picked.removeAll { it.kind == LibraryKind.ALBUM }
+    if (picked.isEmpty()) items.firstOrNull { it.kind != LibraryKind.ALBUM }?.let { picked += it }
     return picked.take(6)
 }
 
@@ -270,7 +292,11 @@ private fun FeaturedHero(item: LibraryItem, index: LibraryIndex, pageCount: Int,
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
-                if (item.kind == LibraryKind.SHOW) "TV SHOW" else "PHIM",
+                when (item.kind) {
+                    LibraryKind.SHOW -> "TV SHOW"
+                    LibraryKind.MUSIC_VIDEO -> "VIDEO CA NHẠC"
+                    else -> "PHIM"
+                },
                 style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.ExtraBold, letterSpacing = 2.sp),
                 color = XtColors.leaf,
             )

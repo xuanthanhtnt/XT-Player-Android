@@ -88,6 +88,14 @@ class TraktRulesTest {
     }
 
     @Test
+    fun musicVideosAreNotOnTrakt() {
+        val items = listOf(movie("v1", "Xin Còn Gọi Tên Nhau", null, kind = LibraryKind.MUSIC_VIDEO))
+        val index = TraktLibraryIndex.build(items, listOf(file("f1", "v1")))
+        assertTrue(index.media.isEmpty())
+        assertEquals(emptyList<String>(), index.keys(TraktMedia.Movie("Xin Còn Gọi Tên Nhau", null, null)))
+    }
+
+    @Test
     fun labelsForTheLog() {
         assertEquals("Dune (2021)", TraktMedia.Movie("Dune", 2021, null).label)
         assertEquals("Breaking Bad S01E02", TraktMedia.Episode("Breaking Bad", 2008, null, 1, 2).label)

@@ -70,4 +70,11 @@ class WatchedRulesTest {
         val bothStarted = oneWatched + entry("e2", position = 120.0, duration = 2400.0)
         assertFalse(LibraryIndex(files, bothStarted).isUnplayed(show))
     }
+
+    @Test
+    fun musicVideoProgressLikeAFilm() {
+        val video = item("v", LibraryKind.MUSIC_VIDEO)
+        val index = LibraryIndex(listOf(file("v1", "v")), listOf(entry("v1", position = 230.0, duration = 240.0)))
+        assertTrue(index.progress(video).watched)
+    }
 }

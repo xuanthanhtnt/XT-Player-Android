@@ -53,6 +53,9 @@ data class RemoteItem(
 ) {
     val fileExtension: String get() = name.substringAfterLast('.', "").lowercase()
     val isVideo: Boolean get() = !isDirectory && fileExtension in FilenameParser.videoExtensions
+    val isAudio: Boolean get() = !isDirectory && fileExtension in FilenameParser.audioExtensions
+    /** Shown and played in the folder browser (the library only collects videos). */
+    val isPlayable: Boolean get() = isVideo || isAudio
     val isSubtitle: Boolean get() = !isDirectory && fileExtension in FilenameParser.subtitleExtensions
     val baseName: String get() = if (name.contains('.')) name.substringBeforeLast('.') else name
 }
@@ -60,6 +63,9 @@ data class RemoteItem(
 interface RemoteFileSystem {
     /** Lists `path` ("" = root: SMB shares, or the WebDAV base path). */
     suspend fun list(path: String): List<RemoteItem>
+
+    /** A whole (small) file: an album cover next to the tracks. */
+    suspend fun download(path: String): ByteArray
 }
 
 class RemoteException(message: String) : Exception(message)

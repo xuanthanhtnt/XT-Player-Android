@@ -90,4 +90,6 @@ class LocalFileSystem : RemoteFileSystem {
             .map { RemoteItem(it.name, it.absolutePath, it.isDirectory, if (it.isDirectory) 0 else it.length(), it.lastModified()) }
             .sortedWith { a, b -> NaturalOrder.compare(a.name, b.name) }
     }
+
+    override suspend fun download(path: String): ByteArray = withContext(Dispatchers.IO) { File(path).readBytes() }
 }

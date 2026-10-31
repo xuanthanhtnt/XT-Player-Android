@@ -81,6 +81,7 @@ object MediaLibrary {
     // Maintenance
 
     suspend fun removeFolder(folder: LibraryFolder) {
+        LibraryFolderKind.set(null, folder.key)
         dao.deleteFilesOfFolder(folder.key)
         dao.deleteFolder(folder.key)
         dao.deleteOrphanItems()
@@ -147,7 +148,7 @@ class LibraryIndex(files: List<LibraryFile>, entries: List<MediaEntry>) {
     fun progress(item: LibraryItem): Progress {
         val files = filesByItem[item.key].orEmpty()
         val mine = files.mapNotNull { entriesByKey[it.key] }
-        if (item.kind == LibraryKind.MOVIE) {
+        if (item.kind == LibraryKind.MOVIE || item.kind == LibraryKind.MUSIC_VIDEO) {
             val best = mine.maxByOrNull { it.progress ?: 0.0 }
             return Progress(if (best?.resumePosition != null) best.progress else null, best?.isWatched ?: false)
         }

@@ -86,6 +86,11 @@ fun DetailScreen(itemKey: String) {
         EmptyText("Không tìm thấy mục này trong thư viện.")
         return
     }
+    // Route.album of the Apple app: an album opens its track list.
+    if (current.kind == LibraryKind.ALBUM) {
+        com.xuanthanhtnt.xtplayer.ui.library.AlbumDetailScreen(itemKey)
+        return
+    }
     val files = remember(itemFiles) { itemFiles.sortedWith(LibraryOrdering.episodes) }
     val entryByKey = remember(itemFiles, allEntries) {
         val keys = itemFiles.map { it.key }.toSet()
@@ -265,7 +270,7 @@ private fun Hero(item: LibraryItem, files: List<LibraryFile>, seasons: List<Int>
                         }
                     }
                 }
-                HeroButton(if (refreshing) "Đang tải…" else "Làm mới", Icons.Filled.Refresh, primary = false) {
+                if (item.kind == LibraryKind.MOVIE || item.kind == LibraryKind.SHOW) HeroButton(if (refreshing) "Đang tải…" else "Làm mới", Icons.Filled.Refresh, primary = false) {
                     if (!refreshing) {
                         refreshing = true
                         actions.scope.launch {

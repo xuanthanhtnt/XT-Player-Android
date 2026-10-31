@@ -56,7 +56,15 @@ data class LibraryFolder(
 }
 
 enum class LibraryKind(val raw: String) {
-    MOVIE("movie"), SHOW("show");
+    MOVIE("movie"),
+    SHOW("show"),
+    /** Concerts, music videos, live shows: kept out of Films and never looked up on TMDb / Trakt. */
+    MUSIC_VIDEO("musicVideo"),
+    /**
+     * A folder of audio tracks. Its files are the tracks: `episode` = track number, `season` = disc,
+     * `episodeTitle` = track title; the album artist is kept in `tagline` (see `artist`).
+     */
+    ALBUM("album");
 
     companion object {
         fun from(raw: String) = entries.firstOrNull { it.raw == raw } ?: MOVIE
@@ -85,6 +93,9 @@ data class LibraryItem(
     val updatedAt: Long = System.currentTimeMillis(),
 ) {
     val kind: LibraryKind get() = LibraryKind.from(kindRaw)
+
+    /** Album artist (albums keep it in `tagline`); music videos keep their folder (artist / show) there too. */
+    val artist: String? get() = if (kind == LibraryKind.ALBUM || kind == LibraryKind.MUSIC_VIDEO) tagline else null
 
     val castMembers: List<CastMember>
         get() = cast.mapNotNull { raw ->

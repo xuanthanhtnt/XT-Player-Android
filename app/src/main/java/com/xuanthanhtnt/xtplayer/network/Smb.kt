@@ -218,6 +218,22 @@ class SmbFileSystem(private val server: ServerCredentials) : RemoteFileSystem {
             }
     }
 
+    override suspend fun download(path: String): ByteArray = withContext(Dispatchers.IO) {
+        val open = SmbConnections.openRead(server, path)
+        try {
+            val data = ByteArray(SmbConnections.size(open.file).coerceIn(0, Int.MAX_VALUE.toLong()).toInt())
+            var filled = 0
+            while (filled < data.size) {
+                val n = open.file.read(data, filled.toLong(), filled, data.size - filled)
+                if (n <= 0) break
+                filled += n
+            }
+            if (filled == data.size) data else data.copyOf(filled)
+        } finally {
+            runCatching { open.file.close() }
+        }
+    }
+
     private fun listShares(): List<RemoteItem> = SmbConnections.withRetry(server) { handle ->
         val transport = SMBTransportFactories.SRVSVC.getTransport(handle.session)
         ServerService(transport).shares1

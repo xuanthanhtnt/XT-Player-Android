@@ -90,12 +90,14 @@ sealed class TraktMedia {
                     if (item.kind == LibraryKind.SHOW && file.season != null && file.episode != null) {
                         return Episode(item.title, item.year, item.tmdbID, file.season, file.episode)
                     }
-                    // Unmatched home videos / concerts would only create noise on Trakt.
-                    if (item.tmdbID == null && item.year == null) return null
+                    // Music videos and albums are not on Trakt; unmatched home videos would only create noise there.
+                    if (item.kind != LibraryKind.MOVIE || (item.tmdbID == null && item.year == null)) return null
                     return Movie(item.title, item.year, item.tmdbID)
                 }
             }
+            // Music files are never films or episodes.
             val name = fallbackName ?: return null
+            if (name.substringAfterLast('.', "").lowercase() in FilenameParser.audioExtensions) return null
             val parsed = FilenameParser.parse(name)
             return when (val kind = parsed.kind) {
                 is ParsedMediaName.Kind.Episode -> Episode(parsed.title, null, null, kind.season, kind.episode)
