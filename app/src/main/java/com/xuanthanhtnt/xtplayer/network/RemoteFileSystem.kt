@@ -63,6 +63,9 @@ data class RemoteItem(
 interface RemoteFileSystem {
     /** Lists `path` ("" = root: SMB shares, or the WebDAV base path). */
     suspend fun list(path: String): List<RemoteItem>
+
+    /** A whole (small) file: an album cover next to the tracks. */
+    suspend fun download(path: String): ByteArray
 }
 
 class RemoteException(message: String) : Exception(message)

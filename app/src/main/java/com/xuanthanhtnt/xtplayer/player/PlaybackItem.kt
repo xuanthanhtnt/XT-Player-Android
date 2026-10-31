@@ -124,6 +124,10 @@ object PlaybackFactory {
             val code = file.episodeCode
             val (title, subtitle) = if (item.kind == LibraryKind.SHOW && code != null) {
                 (file.episodeTitle?.let { "$code · $it" } ?: code) to item.title
+            } else if (item.kind == LibraryKind.ALBUM) {
+                (file.episodeTitle ?: file.fileName.substringBeforeLast('.')) to listOfNotNull(item.artist, item.title).joinToString(" — ")
+            } else if (item.kind == LibraryKind.MUSIC_VIDEO) {
+                item.title to item.artist
             } else {
                 (item.year?.let { "${item.title} ($it)" } ?: item.title) to file.badges.takeIf { it.isNotEmpty() }?.joinToString(" · ")
             }

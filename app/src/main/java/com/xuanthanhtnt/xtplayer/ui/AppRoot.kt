@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Movie
@@ -113,6 +114,7 @@ enum class Section(val route: String, val label: String, val icon: ImageVector, 
     UNWATCHED("unwatched", "Chưa xem", Icons.Filled.VisibilityOff, false),
     TOP_RATED("toprated", "Điểm cao", Icons.Filled.Star, false),
     GENRES("genres", "Thể loại", Icons.Filled.TheaterComedy, false),
+    MUSIC("music", "Nhạc", Icons.Filled.LibraryMusic, true),
     MUSIC_VIDEOS("musicvideos", "Video ca nhạc", Icons.Filled.MusicVideo, false),
     SOURCES("sources", "Nguồn", Icons.Filled.Storage, true),
     SETTINGS("settings", "Cài đặt", Icons.Filled.Settings, true),
@@ -218,7 +220,7 @@ fun XtApp(isTv: Boolean, wide: Boolean) {
                 SideBar(nav, isTv)
                 Column(Modifier.weight(1f).fillMaxHeight()) {
                     if (canGoBack) BackBar { nav.popBackStack() }
-                    Box(Modifier.weight(1f).fillMaxWidth()) { AppNavHost(nav) }
+                    Box(Modifier.weight(1f).fillMaxWidth()) { AppNavHost(nav, sidebar = true) }
                 }
             }
         } else {
@@ -228,7 +230,7 @@ fun XtApp(isTv: Boolean, wide: Boolean) {
                 topBar = { if (canGoBack) BackBar(Modifier.statusBarsPadding()) { nav.popBackStack() } },
                 bottomBar = { BottomBar(nav) },
             ) { padding ->
-                Box(Modifier.fillMaxSize().appBackground().padding(padding)) { AppNavHost(nav) }
+                Box(Modifier.fillMaxSize().appBackground().padding(padding)) { AppNavHost(nav, sidebar = false) }
             }
         }
         if (showUrl) {
@@ -295,7 +297,7 @@ private fun BackBar(modifier: Modifier = Modifier, onBack: () -> Unit) {
 }
 
 @Composable
-private fun AppNavHost(nav: NavHostController) {
+private fun AppNavHost(nav: NavHostController, sidebar: Boolean) {
     NavHost(nav, startDestination = Section.HOME.route, modifier = Modifier.fillMaxSize()) {
         composable(Section.HOME.route) { HomeScreen() }
         composable(Section.SEARCH.route) { SearchScreen() }
@@ -305,6 +307,10 @@ private fun AppNavHost(nav: NavHostController) {
         composable(Section.UNWATCHED.route) { LibraryGridScreen(LibraryFilter.UNWATCHED) }
         composable(Section.TOP_RATED.route) { LibraryGridScreen(LibraryFilter.TOP_RATED) }
         composable(Section.GENRES.route) { GenresScreen() }
+        // Phones get MusicLibraryView (albums or music videos); the sidebar lists the two apart.
+        composable(Section.MUSIC.route) {
+            if (sidebar) com.xuanthanhtnt.xtplayer.ui.library.AlbumsScreen() else com.xuanthanhtnt.xtplayer.ui.library.MusicLibraryScreen()
+        }
         composable(Section.MUSIC_VIDEOS.route) { com.xuanthanhtnt.xtplayer.ui.library.MusicVideosScreen() }
         composable(Section.SOURCES.route) { SourcesScreen() }
         composable(Section.SETTINGS.route) { SettingsScreen() }
@@ -365,6 +371,7 @@ private fun SideBar(nav: NavHostController, isTv: Boolean) {
             SideItem(section.icon, section.label, route == section.route) { actions.openSection(section.route) }
         }
         SideHeader("Âm nhạc")
+        SideItem(Section.MUSIC.icon, Section.MUSIC.label, route == Section.MUSIC.route) { actions.openSection(Section.MUSIC.route) }
         SideItem(Section.MUSIC_VIDEOS.icon, Section.MUSIC_VIDEOS.label, route == Section.MUSIC_VIDEOS.route) {
             actions.openSection(Section.MUSIC_VIDEOS.route)
         }

@@ -37,6 +37,16 @@ class WebDavFileSystem(private val server: ServerCredentials) : RemoteFileSystem
             .filter { !it.name.startsWith(".") && !it.name.startsWith("@") && it.name != "#recycle" }
     }
 
+    override suspend fun download(path: String): ByteArray = withContext(Dispatchers.IO) {
+        val absolute = if (path.startsWith("/")) path else "/$path"
+        val encoded = absolute.split('/').joinToString("/") { android.net.Uri.encode(it) }
+        val request = Request.Builder().url(server.httpBase + encoded).get().build()
+        Http.forServer(server).newCall(request).execute().use { response ->
+            if (response.code != 200) throw RemoteException("Máy chủ trả về lỗi HTTP ${response.code}.")
+            response.body?.bytes() ?: ByteArray(0)
+        }
+    }
+
     private fun normalize(path: String): String {
         var p = path
         while (p.length > 1 && p.endsWith("/")) p = p.dropLast(1)

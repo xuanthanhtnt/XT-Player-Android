@@ -1,6 +1,7 @@
 package com.xuanthanhtnt.xtplayer.player
 
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
@@ -37,6 +38,11 @@ object FrameGrabber {
 
     suspend fun grab(location: String, output: File): Probe? = permits.withPermit {
         withContext(Dispatchers.IO) { runCatching { grabBlocking(location, output) }.getOrNull() }
+    }
+
+    /** An album's picture: the cover embedded in its first track (ID3 APIC, FLAC PICTURE, MP4 covr). */
+    suspend fun grabEmbeddedPicture(location: String, output: File): Boolean = permits.withPermit {
+        withContext(Dispatchers.IO) { runCatching { embeddedPictureBlocking(location, output) }.getOrDefault(false) }
     }
 
     /** A retriever reading [location] (NAS files through [SmbFileReader]); the reader must be released with it. */
@@ -98,18 +104,34 @@ object FrameGrabber {
                 retriever.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
             }) ?: retriever.frameAtTime ?: return null
 
-            val scaled = if (frame.width > 640) {
-                Bitmap.createScaledBitmap(frame, 640, (frame.height * 640f / frame.width).roundToInt().coerceAtLeast(1), true)
-            } else {
-                frame
-            }
-            output.parentFile?.mkdirs()
-            val temp = File(output.parentFile, output.name + ".tmp")
-            temp.outputStream().use { scaled.compress(Bitmap.CompressFormat.JPEG, 82, it) }
-            temp.renameTo(output)
+            save(frame, output, 640)
             return Probe(durationMs / 1000.0, width, height)
         } finally {
             source.close()
         }
+    }
+
+    private fun embeddedPictureBlocking(location: String, output: File): Boolean {
+        val source = open(location) ?: return false
+        try {
+            val bytes = source.retriever.embeddedPicture ?: return false
+            val picture = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return false
+            save(picture, output, 600)
+            return true
+        } finally {
+            source.close()
+        }
+    }
+
+    private fun save(bitmap: Bitmap, output: File, maxWidth: Int) {
+        val scaled = if (bitmap.width > maxWidth) {
+            Bitmap.createScaledBitmap(bitmap, maxWidth, (bitmap.height * maxWidth.toFloat() / bitmap.width).roundToInt().coerceAtLeast(1), true)
+        } else {
+            bitmap
+        }
+        output.parentFile?.mkdirs()
+        val temp = File(output.parentFile, output.name + ".tmp")
+        temp.outputStream().use { scaled.compress(Bitmap.CompressFormat.JPEG, 82, it) }
+        temp.renameTo(output)
     }
 }

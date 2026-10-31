@@ -36,10 +36,21 @@ class LibraryScanner {
     private val artworkLock = Mutex()
     private val dao get() = AppGraph.dao
 
-    private class Found(val item: RemoteItem, val parentName: String, val subtitles: List<String>)
+    /** A video or a track; tracks also carry their folder, the folder above it, and the cover image next to them. */
+    private class Found(
+        val item: RemoteItem,
+        val parentName: String,
+        val subtitles: List<String>,
+        val directory: String = "",
+        val directoryParent: String? = null,
+        val cover: RemoteItem? = null,
+    )
 
     /** What a music video's file and folder say: its title, year, and artist / show. */
     data class MusicVideoInfo(val title: String, val year: Int?, val artist: String?)
+
+    /** What an album folder's name says: "Artist - Album (2019) [FLAC 24-96]". */
+    data class AlbumName(val artist: String?, val title: String, val year: Int?)
 
     fun scanAllInBackground() {
         AppGraph.scope.launch { scanAll() }
@@ -63,8 +74,9 @@ class LibraryScanner {
             statusText.value = "Đang quét ${folder.name}…"
 
             val kind = LibraryFolderKind.of(folder.key)
+            val fs = RemoteFileSystems.make(server)
             val found = try {
-                collect(RemoteFileSystems.make(server), folder.path, audio = kind == LibraryFolderKind.MUSIC) { count ->
+                collect(fs, folder.path, audio = kind == LibraryFolderKind.MUSIC) { count ->
                     statusText.value = "Đang quét ${folder.name}: $count tệp…"
                 }
             } catch (e: Exception) {
@@ -77,8 +89,7 @@ class LibraryScanner {
             when (kind) {
                 LibraryFolderKind.FILMS -> recogniseFilms(found, folder, server, seenKeys)
                 LibraryFolderKind.MUSIC_VIDEOS -> recogniseMusicVideos(found, folder, server, seenKeys)
-                // Albums of tracks arrive with the music player (parity step 2); the tracks are counted meanwhile.
-                LibraryFolderKind.MUSIC -> Unit
+                LibraryFolderKind.MUSIC -> recogniseAlbums(found, fs, folder, server, seenKeys)
             }
 
             // Files that disappeared from this folder.
@@ -183,6 +194,81 @@ class LibraryScanner {
     }
 
     /**
+     * One album per folder of tracks ("CD1" / "Disc 2" folders join their parent). The album artist is the folder
+     * above, or the part before " - " in "Artist - Album"; the cover is cover / folder / front.jpg next to the
+     * tracks, else the picture embedded in the first track (see generateMissingArtwork).
+     */
+    private suspend fun recogniseAlbums(
+        found: List<Found>,
+        fs: RemoteFileSystem,
+        folder: LibraryFolder,
+        server: ServerCredentials,
+        seenKeys: MutableSet<String>,
+    ) {
+        val albums = mutableMapOf<String, LibraryItem>()
+        val covers = mutableMapOf<String, RemoteItem>()
+        found.forEachIndexed { index, entry ->
+            statusText.value = "Nhận diện ${index + 1}/${found.size}…"
+            val fileKey = RemoteFileSystems.key(server, entry.item.path)
+            seenKeys.add(fileKey)
+
+            var albumPath = entry.directory
+            var albumName = entry.parentName
+            var artistName = entry.directoryParent
+            var disc: Int? = null
+            val number = discNumber(albumName)
+            val parent = entry.directoryParent
+            if (number != null && parent != null) {
+                disc = number
+                albumPath = deletingLastPathComponent(albumPath)
+                albumName = parent
+                artistName = null
+            }
+            val parsedAlbum = albumTitle(albumName)
+            val key = "album:${server.id}:$albumPath"
+            val previous = albums[key] ?: plainItem(key, LibraryKind.ALBUM, parsedAlbum.title)
+            val album = previous.copy(
+                title = parsedAlbum.title,
+                year = parsedAlbum.year ?: previous.year,
+                tagline = parsedAlbum.artist ?: (if (artistName == folder.name) null else artistName),
+            )
+            if (album != albums[key]) dao.upsertItem(album)
+            albums[key] = album
+            if (covers[key] == null) entry.cover?.let { covers[key] = it }
+
+            val track = FilenameParser.track(entry.item.name)
+            dao.upsertFile(
+                libraryFile(entry, fileKey, album, folder, server).copy(
+                    season = disc ?: track.disc,
+                    episode = track.number,
+                    episodeTitle = track.title,
+                    badges = listOf(trackFormat(entry.item.fileExtension)),
+                )
+            )
+        }
+
+        for ((key, cover) in covers) {
+            val album = albums[key] ?: continue
+            if (ThumbnailStore.isUsable(album.posterPath)) continue
+            val reference = ThumbnailStore.reference("cover:$key")
+            val output = ThumbnailStore.file(reference) ?: continue
+            val data = runCatching { fs.download(cover.path) }.getOrNull() ?: continue
+            if (data.isEmpty()) continue
+            if (runCatching { output.writeBytes(data) }.isFailure) continue
+            dao.item(key)?.let { dao.upsertItem(it.copy(posterPath = reference, backdropPath = reference)) }
+        }
+    }
+
+    private suspend fun plainItem(key: String, kind: LibraryKind, title: String): LibraryItem =
+        dao.item(key)?.copy(kindRaw = kind.raw) ?: LibraryItem(key = key, kindRaw = kind.raw, title = title, year = null)
+
+    private suspend fun libraryFile(entry: Found, key: String, item: LibraryItem, folder: LibraryFolder, server: ServerCredentials): LibraryFile =
+        (dao.file(key) ?: LibraryFile(
+            key = key, itemKey = item.key, folderKey = folder.key, serverID = server.id,
+            path = entry.item.path, fileName = entry.item.name, size = entry.item.size,
+        )).copy(itemKey = item.key, folderKey = folder.key, size = entry.item.size)
+
+    /**
      * Items without TMDb artwork (home videos, concerts, unmatched titles) and Continue Watching entries
      * without a picture get a frame of their video, as Infuse does. Runs after each scan and once at launch.
      */
@@ -206,9 +292,14 @@ class LibraryScanner {
                 if (!output.exists()) {
                     statusText.value = "Tạo ảnh bìa ${index + 1}/${items.size}…"
                     ServerRegistry.register(server)
-                    val probe = FrameGrabber.grab(RemoteFileSystems.playbackUri(server, file.path).toString(), output)
-                        ?: return@forEachIndexed
-                    MediaLibrary.learn(file.key, probe.resolutionLabel, probe.duration)
+                    val location = RemoteFileSystems.playbackUri(server, file.path).toString()
+                    if (item.kind == LibraryKind.ALBUM) {
+                        // An album's picture is the cover embedded in its first track.
+                        if (!FrameGrabber.grabEmbeddedPicture(location, output)) return@forEachIndexed
+                    } else {
+                        val probe = FrameGrabber.grab(location, output) ?: return@forEachIndexed
+                        MediaLibrary.learn(file.key, probe.resolutionLabel, probe.duration)
+                    }
                 }
                 dao.item(item.key)?.let { dao.upsertItem(it.copy(posterPath = reference, backdropPath = reference)) }
                 for (f in files) {
@@ -259,6 +350,100 @@ class LibraryScanner {
             "extras", "featurettes", "behind the scenes", "deleted scenes", "trailers", "sample", "samples", "other", "interviews",
         )
         private const val MAX_DEPTH = 7
+        private val coverNames = listOf("cover", "folder", "front", "album", "albumart", "albumartsmall")
+        private val albumYear = Regex("""[(\[]((?:19|20)\d{2})[)\]]""")
+        private val bracketedTag = Regex("""\s*[(\[{][^)\]}]*[)\]}]""")
+
+        /** "CD1", "CD 2", "Disc 3", "Disk 1" → disc number. */
+        fun discNumber(name: String): Int? {
+            val folded = name.lowercase().replace(" ", "")
+            for (prefix in listOf("cd", "disc", "disk")) {
+                if (folded.startsWith(prefix)) return folded.drop(prefix.length).toIntOrNull()
+            }
+            return null
+        }
+
+        /** "Artist - Album (2019) [FLAC 24-96]" → artist, album, year. */
+        fun albumTitle(name: String): AlbumName {
+            var title = name.replace('_', ' ')
+            var year = albumYear.find(title)?.groupValues?.get(1)?.toIntOrNull()
+            // Drop bracketed tags: years, formats, bit depths.
+            title = title.replace(bracketedTag, "")
+            var artist: String? = null
+            val parts = title.split(" - ")
+            val first = parts.first().trim()
+            if (parts.size >= 2 && first.isNotEmpty()) {
+                val leadingYear = first.toIntOrNull()
+                if (leadingYear != null && leadingYear in 1900..2100) year = year ?: leadingYear else artist = first
+                title = parts.drop(1).joinToString(" - ")
+            }
+            title = title.trim()
+            return AlbumName(artist, title.ifEmpty { name }, year)
+        }
+
+        /** "Share/Artist/Album/CD1" → "Share/Artist/Album" (NSString `deletingLastPathComponent`). */
+        internal fun deletingLastPathComponent(path: String): String {
+            val trimmed = path.trimEnd('/')
+            val slash = trimmed.lastIndexOf('/')
+            return when {
+                slash > 0 -> trimmed.substring(0, slash)
+                slash == 0 -> "/"
+                else -> ""
+            }
+        }
+
+        /** A track's format chip, named as the player names its codec: "FLAC", "ALAC", "DSD", "WavPack", "PCM". */
+        fun trackFormat(fileExtension: String): String = prettyCodec(if (fileExtension == "dff") "dsd" else codecName(fileExtension))
+
+        private fun codecName(fileExtension: String): String = when (fileExtension) {
+            "dsf", "dff" -> "dsd"
+            "wv" -> "wavpack"
+            "m4a", "alac" -> "alac"
+            "aif", "aiff", "aifc", "wav", "w64" -> "pcm_$fileExtension"
+            "thd", "truehd" -> "truehd"
+            "dtshd" -> "dts"
+            "ec3" -> "eac3"
+            "oga", "ogg" -> "vorbis"
+            "mpc" -> "mpc8"
+            else -> fileExtension
+        }
+
+        /** MPVPlayerEngine.swift `prettyCodec`. */
+        fun prettyCodec(codec: String): String {
+            val lower = codec.lowercase()
+            if (lower.startsWith("pcm_")) return "PCM"
+            if (lower.startsWith("dsd_")) return "DSD"
+            return when (lower) {
+                "truehd" -> "TrueHD"
+                "mlp" -> "MLP"
+                "dst" -> "DSD (DST)"
+                "wavpack" -> "WavPack"
+                "alac" -> "ALAC"
+                "ape" -> "APE"
+                "tta" -> "TTA"
+                "tak" -> "TAK"
+                "mpc7", "mpc8" -> "Musepack"
+                "vorbis" -> "Vorbis"
+                "mp3", "mp3float" -> "MP3"
+                "vvc" -> "H.266"
+                "vp9" -> "VP9"
+                "dts" -> "DTS"
+                "eac3" -> "DD+"
+                "ac3" -> "AC3"
+                "flac" -> "FLAC"
+                "aac" -> "AAC"
+                "opus" -> "Opus"
+                "hevc" -> "HEVC"
+                "h264" -> "H.264"
+                "av1" -> "AV1"
+                "subrip" -> "SRT"
+                "ass", "ssa" -> "ASS"
+                "webvtt" -> "VTT"
+                "hdmv_pgs_subtitle" -> "PGS"
+                "dvd_subtitle" -> "VobSub"
+                else -> codec.uppercase()
+            }
+        }
 
         /** A music video's title (from the file name, at least two characters), year, and artist / show (its folder). */
         fun musicVideoInfo(fileName: String, baseName: String, parentName: String, folderName: String): MusicVideoInfo {
@@ -284,12 +469,13 @@ class LibraryScanner {
         }
     }
 
-    /** Video files (with their subtitles), or audio tracks for music folders. */
+    /** Video files (with their subtitles), or audio tracks (with a cover image of their folder) for music folders. */
     private suspend fun collect(fs: RemoteFileSystem, root: String, audio: Boolean = false, progress: (Int) -> Unit): List<Found> {
         val results = mutableListOf<Found>()
         val queue = ArrayDeque<Triple<String, Int, String>>()
         queue.add(Triple(root, 0, root.trimEnd('/').substringAfterLast('/')))
         val showFolderName = mutableMapOf<String, String>()
+        val parentName = mutableMapOf<String, String>()
         while (queue.isNotEmpty()) {
             val (path, depth, name) = queue.removeFirst()
             val items = try {
@@ -299,7 +485,18 @@ class LibraryScanner {
                 continue
             }
             if (audio) {
-                for (track in items.filter { it.isAudio }) results += Found(track, name, emptyList())
+                val tracks = items.filter { it.isAudio }
+                val images = items.filter { !it.isDirectory && it.fileExtension in setOf("jpg", "jpeg", "png") && it.size < 15_000_000 }
+                val cover = coverNames.firstNotNullOfOrNull { wanted -> images.firstOrNull { it.baseName.lowercase() == wanted } }
+                    ?: images.firstOrNull()
+                for (track in tracks) {
+                    results += Found(
+                        track, name, emptyList(),
+                        directory = path,
+                        directoryParent = if (depth == 0) null else parentName[path],
+                        cover = cover,
+                    )
+                }
             }
             val subtitles = items.filter { it.isSubtitle }
             val videos = if (audio) emptyList() else items.filter { it.isVideo }
@@ -317,6 +514,8 @@ class LibraryScanner {
             for (dir in items) {
                 if (!dir.isDirectory || dir.name.lowercase() in skippedFolders) continue
                 showFolderName[dir.path] = parent
+                // The folder above an album (its artist); never the library folder itself.
+                if (depth > 0) parentName[dir.path] = name
                 queue.add(Triple(dir.path, depth + 1, dir.name))
             }
         }

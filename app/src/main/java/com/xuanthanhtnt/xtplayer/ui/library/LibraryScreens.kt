@@ -206,7 +206,7 @@ private fun fold(text: String): String =
 
 /** MusicViews.swift `MusicVideosView`: every music video, newest first or by artist / show. */
 @Composable
-fun MusicVideosScreen() {
+fun MusicVideosScreen(embedded: Boolean = false) {
     val dao = AppGraph.dao
     val all by remember { dao.itemsFlow() }.collectAsState(initial = emptyList())
     val files by remember { dao.filesFlow() }.collectAsState(initial = emptyList())
@@ -227,16 +227,9 @@ fun MusicVideosScreen() {
     ) {
         item(span = { GridItemSpan(maxLineSpan) }) {
             Column {
-                PageTitle("Video ca nhạc", inset = false)
+                if (!embedded) PageTitle("Video ca nhạc", inset = false)
                 if (videos.isEmpty()) {
-                    Text("Chưa có video ca nhạc nào", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        "Mở thư mục trên NAS ở mục Nguồn, bấm “Thêm thư mục này vào thư viện” và chọn “Video ca nhạc”. " +
-                            "Thư mục đã thêm: nhấn giữ ở mục Nguồn ▸ Loại thư mục.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = XtColors.secondaryText,
-                        modifier = Modifier.padding(vertical = 8.dp),
-                    )
+                    MusicEmptyHint(com.xuanthanhtnt.xtplayer.data.LibraryFolderKind.MUSIC_VIDEOS)
                 } else {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(bottom = 8.dp)) {
                         SortChip("Mới thêm", !byArtist) { byArtist = false }

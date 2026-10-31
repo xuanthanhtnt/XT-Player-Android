@@ -112,6 +112,7 @@ fun HomeScreen() {
     val movies = remember(items) { items.filter { it.kind == LibraryKind.MOVIE } }
     val shows = remember(items) { items.filter { it.kind == LibraryKind.SHOW } }
     val musicVideos = remember(items) { items.filter { it.kind == LibraryKind.MUSIC_VIDEO } }
+    val albums = remember(items) { items.filter { it.kind == LibraryKind.ALBUM } }
     val featured = remember(items, continueWatching, index) { featuredItems(items, continueWatching, index) }
     var featuredIndex by remember { mutableIntStateOf(0) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -216,6 +217,13 @@ fun HomeScreen() {
             item(key = "musicVideos") {
                 ShelfRow("Video ca nhạc", onSeeAll = { actions.openSection(com.xuanthanhtnt.xtplayer.ui.Section.MUSIC_VIDEOS.route) }) {
                     items(musicVideos.take(20), key = { it.key }) { com.xuanthanhtnt.xtplayer.ui.library.MusicVideoCard(it, index) }
+                }
+            }
+        }
+        if (albums.isNotEmpty()) {
+            item(key = "albums") {
+                ShelfRow("Nhạc", onSeeAll = { actions.openSection(com.xuanthanhtnt.xtplayer.ui.Section.MUSIC.route) }) {
+                    items(albums.take(20), key = { it.key }) { com.xuanthanhtnt.xtplayer.ui.library.AlbumLink(it, index) }
                 }
             }
         }
