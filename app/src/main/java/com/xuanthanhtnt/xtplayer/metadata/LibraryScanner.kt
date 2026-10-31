@@ -38,6 +38,9 @@ class LibraryScanner {
 
     private class Found(val item: RemoteItem, val parentName: String, val subtitles: List<String>)
 
+    /** What a music video's file and folder say: its title, year, and artist / show. */
+    data class MusicVideoInfo(val title: String, val year: Int?, val artist: String?)
+
     fun scanAllInBackground() {
         AppGraph.scope.launch { scanAll() }
     }
@@ -256,8 +259,6 @@ class LibraryScanner {
             "extras", "featurettes", "behind the scenes", "deleted scenes", "trailers", "sample", "samples", "other", "interviews",
         )
         private const val MAX_DEPTH = 7
-
-        data class MusicVideoInfo(val title: String, val year: Int?, val artist: String?)
 
         /** A music video's title (from the file name, at least two characters), year, and artist / show (its folder). */
         fun musicVideoInfo(fileName: String, baseName: String, parentName: String, folderName: String): MusicVideoInfo {
