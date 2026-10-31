@@ -44,8 +44,9 @@ class PlayerController(
     var onLoaded: ((PlaybackItem) -> Unit)? = null
 
     private var traktMedia: TraktMedia? = null
-    private var traktStarted = false
+    private val scrobbleGate = com.xuanthanhtnt.xtplayer.trakt.ScrobbleGate()
     private var learned = false
+    private var durationKnown = false
     private var finished = false
     private var upNextJob: Job? = null
     private var lastState: PlaybackState = PlaybackState.Idle
@@ -53,6 +54,15 @@ class PlayerController(
     fun start() {
         load(indexState.value)
         scope.launch { engine.state.collect { onState(it) } }
+        // The duration often arrives just after "playing": send the start then (PlayerScreen.swift onChange).
+        scope.launch {
+            engine.duration.collect { duration ->
+                if (duration > 0 && !durationKnown) {
+                    durationKnown = true
+                    if (engine.state.value == PlaybackState.Playing) scrobble(TraktService.ScrobbleAction.START)
+                }
+            }
+        }
         scope.launch {
             engine.video.collect { video ->
                 if (video.fps > 0 || video.width > 0) onVideo(video)
@@ -84,7 +94,7 @@ class PlayerController(
         currentState.value = item
         learned = false
         finished = false
-        traktStarted = false
+        durationKnown = false
         traktMedia = null
         item.server?.let(com.xuanthanhtnt.xtplayer.network.ServerRegistry::register)
         engine.load(item)
@@ -92,6 +102,8 @@ class PlayerController(
         onLoaded?.invoke(item)
         scope.launch {
             traktMedia = TraktMedia.from(item.key, item.fileName)
+            // Looked up after playback may already have started (the Apple app knows it before loading).
+            if (engine.state.value == PlaybackState.Playing) scrobble(TraktService.ScrobbleAction.START)
             MediaLibrary.touch(item)
         }
     }
@@ -173,9 +185,7 @@ class PlayerController(
         val previous = lastState
         lastState = state
         when (state) {
-            PlaybackState.Playing -> {
-                if (previous != PlaybackState.Playing) scrobble(TraktService.ScrobbleAction.START)
-            }
+            PlaybackState.Playing -> scrobble(TraktService.ScrobbleAction.START)
             PlaybackState.Paused -> {
                 if (previous == PlaybackState.Playing) {
                     scrobble(TraktService.ScrobbleAction.PAUSE)
@@ -206,12 +216,9 @@ class PlayerController(
 
     /** Trakt scrobble for the current file; a stop under 80 % leaves a resume point other devices pick up. */
     private fun scrobble(action: TraktService.ScrobbleAction, progress: Double? = null) {
-        val media = traktMedia ?: return
+        val media = traktMedia
         val duration = engine.duration.value
-        if (duration <= 0 && progress == null) return
-        if (action == TraktService.ScrobbleAction.START) traktStarted = true
-        if (action != TraktService.ScrobbleAction.START && !traktStarted) return
-        if (action == TraktService.ScrobbleAction.STOP) traktStarted = false
-        AppGraph.trakt.scrobble(action, media, progress ?: (engine.position.value / duration * 100))
+        if (!scrobbleGate.allow(action, hasMedia = media != null, durationKnown = duration > 0)) return
+        AppGraph.trakt.scrobble(action, media ?: return, progress ?: (engine.position.value / duration * 100))
     }
 }

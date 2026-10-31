@@ -3,6 +3,8 @@ package com.xuanthanhtnt.xtplayer.trakt
 import com.xuanthanhtnt.xtplayer.AppGraph
 import com.xuanthanhtnt.xtplayer.core.AppSettings
 import com.xuanthanhtnt.xtplayer.core.Http
+import com.xuanthanhtnt.xtplayer.data.LibraryFile
+import com.xuanthanhtnt.xtplayer.data.LibraryItem
 import com.xuanthanhtnt.xtplayer.data.LibraryKind
 import com.xuanthanhtnt.xtplayer.data.MediaEntry
 import com.xuanthanhtnt.xtplayer.metadata.FilenameParser
@@ -53,6 +55,13 @@ sealed class TraktMedia {
             "episode" to buildJsonObject { put("season", season); put("number", number) },
         )
     }
+
+    /** "Dune (2021)" / "Breaking Bad S01E02", for the diagnostics log. */
+    val label: String
+        get() = when (this) {
+            is Movie -> year?.let { "$title ($it)" } ?: title
+            is Episode -> "%s S%02dE%02d".format(show, season, number)
+        }
 
     /** Same title/year/id for matching Trakt lists against the library. */
     val identity: String
@@ -116,6 +125,9 @@ class TraktService {
     private val usernameState = MutableStateFlow("")
     private val statusState = MutableStateFlow("")
     private val syncing = MutableStateFlow(false)
+    private val lastSyncState = MutableStateFlow<Long?>(null)
+    /** When the last sync finished (epoch ms). */
+    val lastSync: StateFlow<Long?> = lastSyncState
     val phase: StateFlow<Phase> = phaseState
     val username: StateFlow<String> = usernameState
     val status: StateFlow<String> = statusState
@@ -215,8 +227,23 @@ class TraktService {
     /** `progress` 0…100. A stop under 80 % keeps a resume point on Trakt; at 80 % or more the item is watched. */
     fun scrobble(action: ScrobbleAction, media: TraktMedia, progress: Double) {
         if (!isConnected || !AppGraph.settings.traktScrobble.value || !progress.isFinite()) return
-        val body = JsonObject(media.scrobbleObject() + ("progress" to JsonPrimitive(min(100.0, max(0.0, (progress * 100).roundToLong() / 100.0)))))
-        AppGraph.scope.launch { runCatching { raw("/scrobble/${action.path}", "POST", body, authorized = true) } }
+        val percent = min(100.0, max(0.0, (progress * 100).roundToLong() / 100.0))
+        val body = JsonObject(media.scrobbleObject() + ("progress" to JsonPrimitive(percent)))
+        AppGraph.scope.launch {
+            try {
+                val (status, _) = raw("/scrobble/${action.path}", "POST", body, authorized = true)
+                when (status) {
+                    in 200..299 -> log("scrobble ${action.path} ${media.label} ${percent.toInt()} %")
+                    409 -> Unit                             // the same item was scrobbled moments ago
+                    404 -> log("scrobble ${media.label}: Trakt không tìm thấy phim / tập này")
+                    else -> log("scrobble ${action.path} ${media.label}: HTTP $status")
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                log("scrobble ${action.path} ${media.label}: ${e.message}")
+            }
+        }
     }
 
     // History
@@ -225,7 +252,14 @@ class TraktService {
         if (!isConnected || media.isEmpty()) return
         val body = historyBody(media)
         AppGraph.scope.launch {
-            runCatching { raw(if (watched) "/sync/history" else "/sync/history/remove", "POST", body, authorized = true) }
+            try {
+                val (status, _) = raw(if (watched) "/sync/history" else "/sync/history/remove", "POST", body, authorized = true)
+                log("${if (watched) "đánh dấu đã xem" else "bỏ đã xem"} ${media.size} mục: HTTP $status")
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                log("lịch sử xem: ${e.message}")
+            }
         }
     }
 
@@ -261,22 +295,32 @@ class TraktService {
 
     // Sync
 
+    /** Syncs unless that happened in the last `interval` seconds (app back in front, player closed, timer). */
+    suspend fun syncIfStale(intervalSeconds: Long = 300) {
+        if (!isStale(lastSyncState.value, System.currentTimeMillis(), intervalSeconds)) return
+        sync()
+    }
+
     /** Pulls resume points and watched history into the library and pushes local "watched" Trakt lacks. */
     suspend fun sync(): Unit = withContext(Dispatchers.IO) {
         if (!isConnected || !syncing.compareAndSet(false, true)) return@withContext
         statusState.value = "Đang đồng bộ Trakt…"
         try {
-            val index = TraktLibraryIndex.build()
+            val index = TraktLibraryIndex.build(AppGraph.dao.items(), AppGraph.dao.files())
             val playback = getList("/sync/playback")
             val watchedMovies = getList("/sync/watched/movies")
             val watchedShows = getList("/sync/watched/shows")
 
             var resumed = 0
+            val matched = mutableSetOf<String>()
             for (item in playback) {
                 val media = media(item) ?: continue
                 val progress = item.double("progress") ?: continue
                 val pausedAt = date(item.string("paused_at")) ?: continue
-                for (key in index.keys(media)) if (applyResume(key, progress, pausedAt, index)) resumed++
+                for (key in index.keys(media)) {
+                    matched += key
+                    if (applyResume(key, progress, pausedAt, index)) resumed++
+                }
             }
 
             val remoteWatched = mutableSetOf<String>()
@@ -285,8 +329,12 @@ class TraktService {
                 val media = (item["movie"] as? JsonObject)?.let(::movie) ?: continue
                 remoteWatched += media.identity
                 val at = date(item.string("last_watched_at")) ?: 0L
-                for (key in index.keys(media)) if (markWatched(key, at, index)) marked++
+                for (key in index.keys(media)) {
+                    matched += key
+                    if (markWatched(key, at, index)) marked++
+                }
             }
+            var remoteEpisodes = 0
             for (item in watchedShows) {
                 val show = item["show"] as? JsonObject ?: continue
                 val seasons = item["seasons"] as? JsonArray ?: continue
@@ -296,8 +344,12 @@ class TraktService {
                     for (episode in episodes.mapNotNull { it as? JsonObject }) {
                         val media = episode(show, number, episode.int("number") ?: continue) ?: continue
                         remoteWatched += media.identity
+                        remoteEpisodes++
                         val at = date(episode.string("last_watched_at")) ?: 0L
-                        for (key in index.keys(media)) if (markWatched(key, at, index)) marked++
+                        for (key in index.keys(media)) {
+                            matched += key
+                            if (markWatched(key, at, index)) marked++
+                        }
                     }
                 }
             }
@@ -307,17 +359,20 @@ class TraktService {
                 .filter { it.identity !in remoteWatched }.distinct()
             if (missing.isNotEmpty()) setWatched(true, missing)
 
-            statusState.value = if (index.media.isEmpty()) {
-                "Thư viện chưa có phim / tập nào Trakt nhận ra. Trakt chỉ đồng bộ phim và TV show có trên TMDb " +
-                    "(cần khoá TMDb trong Cài đặt ▸ Thư viện); video ca nhạc, clip tự quay không có trên Trakt."
-            } else {
-                "Đã đồng bộ: $resumed điểm xem tiếp, $marked mục đã xem" +
-                    if (missing.isEmpty()) "" else ", gửi ${missing.size} lên Trakt"
-            }
+            lastSyncState.value = System.currentTimeMillis()
+            val parts = mutableListOf(
+                "Trakt có ${watchedMovies.size} phim, $remoteEpisodes tập đã xem, ${playback.size} điểm xem tiếp",
+                "khớp ${matched.size} tệp trong thư viện (${index.media.size} tệp nhận diện được)",
+            )
+            if (resumed + marked > 0) parts += "cập nhật ${resumed + marked}"
+            if (missing.isNotEmpty()) parts += "gửi ${missing.size} mục đã xem lên Trakt"
+            statusState.value = parts.joinToString(" · ")
+            log("sync: " + statusState.value)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             statusState.value = e.message ?: e.toString()
+            log("sync: ${statusState.value}")
         } finally {
             syncing.value = false
         }
@@ -454,19 +509,43 @@ class TraktService {
                 .header("trakt-api-version", "2")
                 .header("trakt-api-key", client.first)
                 .apply {
-                    if (bearer != null) header("Authorization", "Bearer $bearer")
+                    if (bearer != null) {
+                        header("Authorization", "Bearer $bearer")
+                        // Watched lists and resume points change on other devices: never answer them from a cache.
+                        header("Cache-Control", "no-cache")
+                    }
                     if (body != null) method(verb, body.toString().toRequestBody("application/json".toMediaType()))
                     else method(verb, null)
                 }
                 .build()
-            Http.client.newCall(request).execute().use { response -> response.code to (response.body?.string().orEmpty()) }
+            for (attempt in 0 until 3) {
+                val (code, text, retryAfter) = Http.client.newCall(request).execute().use { response ->
+                    Triple(response.code, response.body?.string().orEmpty(), response.header("Retry-After"))
+                }
+                // Rate limit (1000 GET / 5 min, 1 POST / s): wait as long as Trakt asks, then retry.
+                if (code == 429 && attempt < 2) {
+                    kotlinx.coroutines.delay((retryDelaySeconds(retryAfter) * 1000).toLong())
+                    continue
+                }
+                return@withContext code to text
+            }
+            429 to ""
         }
     }
 
-    private companion object {
-        const val API = "https://api.trakt.tv"
-        const val TOKEN_ACCOUNT = "trakt.token"
-        const val USERNAME_KEY = "trakt.username"
+    private fun log(message: String) = com.xuanthanhtnt.xtplayer.core.AppLog.append("[trakt] $message")
+
+    companion object {
+        /** Seconds to wait after HTTP 429: Trakt's Retry-After, kept within 1…30 s (2 s when missing). */
+        fun retryDelaySeconds(retryAfter: String?): Double = min(30.0, max(1.0, retryAfter?.trim()?.toDoubleOrNull() ?: 2.0))
+
+        /** A sync is due when none has finished yet, or the last one is at least `intervalSeconds` old. */
+        fun isStale(lastSync: Long?, now: Long, intervalSeconds: Long): Boolean =
+            lastSync == null || now - lastSync >= intervalSeconds * 1000
+
+        private const val API = "https://api.trakt.tv"
+        private const val TOKEN_ACCOUNT = "trakt.token"
+        private const val USERNAME_KEY = "trakt.username"
     }
 }
 
@@ -483,20 +562,29 @@ class TraktLibraryIndex private constructor() {
     val titles = mutableMapOf<String, String>()
     /** file key → minutes. */
     val runtime = mutableMapOf<String, Int>()
+    /** Films by normalised title (display and original), for Trakt items whose year differs or is missing here. */
+    private val moviesByTitle = mutableMapOf<String, MutableList<Pair<String, Int?>>>()
 
     companion object {
-        suspend fun build(): TraktLibraryIndex {
+        fun build(items: List<LibraryItem>, files: List<LibraryFile>): TraktLibraryIndex {
             val index = TraktLibraryIndex()
-            val items = AppGraph.dao.items().associateBy { it.key }
-            for (file in AppGraph.dao.files()) {
-                val item = items[file.itemKey] ?: continue
+            val byKey = items.associateBy { it.key }
+            for (file in files) {
+                val item = byKey[file.itemKey] ?: continue
                 val forms = mutableListOf<TraktMedia>()
+                val original = item.originalTitle?.takeIf { it != item.title }
                 if (item.kind == LibraryKind.SHOW && file.season != null && file.episode != null) {
                     forms += TraktMedia.Episode(item.title, item.year, item.tmdbID, file.season, file.episode)
                     if (item.tmdbID != null) forms += TraktMedia.Episode(item.title, item.year, null, file.season, file.episode)
+                    if (original != null) forms += TraktMedia.Episode(original, item.year, null, file.season, file.episode)
                 } else if (item.kind == LibraryKind.MOVIE) {
                     forms += TraktMedia.Movie(item.title, item.year, item.tmdbID)
                     if (item.tmdbID != null) forms += TraktMedia.Movie(item.title, item.year, null)
+                    // TMDb in Vietnamese gives a Vietnamese title; Trakt lists the original one.
+                    if (original != null) forms += TraktMedia.Movie(original, item.year, null)
+                    for (title in setOfNotNull(item.title, item.originalTitle)) {
+                        index.moviesByTitle.getOrPut(TraktMedia.normalize(title)) { mutableListOf() } += file.key to item.year
+                    }
                 }
                 val primary = forms.firstOrNull() ?: continue
                 if (item.tmdbID != null || item.year != null || item.kind == LibraryKind.SHOW) index.media[file.key] = primary
@@ -508,11 +596,24 @@ class TraktLibraryIndex private constructor() {
         }
     }
 
-    /** Library files for a Trakt item: by TMDb id first, then by title and year. */
+    /**
+     * Library files for a Trakt item: by TMDb id first, then by title and year, then by title alone when one
+     * side has no year or the years are one apart (release vs. festival year).
+     */
     fun keys(media: TraktMedia): List<String> {
         byIdentity[media.identity]?.takeIf { it.isNotEmpty() }?.let { return it }
         return when (media) {
-            is TraktMedia.Movie -> if ((media.tmdb ?: 0) > 0) byIdentity[media.copy(tmdb = null).identity].orEmpty() else emptyList()
+            is TraktMedia.Movie -> {
+                if (media.tmdb != null) {
+                    byIdentity[media.copy(tmdb = null).identity]?.takeIf { it.isNotEmpty() }?.let { return it }
+                }
+                val normalized = TraktMedia.normalize(media.title)
+                if (normalized.isEmpty()) return emptyList()
+                moviesByTitle[normalized].orEmpty().filter { (_, local) ->
+                    val year = media.year
+                    year == null || local == null || kotlin.math.abs(local - year) <= 1
+                }.map { it.first }
+            }
             is TraktMedia.Episode -> if ((media.tmdb ?: 0) > 0) byIdentity[media.copy(tmdb = null).identity].orEmpty() else emptyList()
         }
     }
