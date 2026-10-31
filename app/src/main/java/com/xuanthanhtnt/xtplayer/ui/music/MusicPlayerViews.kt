@@ -246,6 +246,9 @@ private fun NowPlayingContent(item: PlaybackItem) {
         BoxWithConstraints(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars)) {
             val wide = maxWidth > 900.dp
             val cover = minOf(420.dp, maxWidth * 0.7f, maxHeight * 0.42f)
+            // Read here: Row / Column scopes cannot reach BoxWithConstraints' size.
+            val queueHeight = maxHeight * 0.55f
+            val queueWidth = minOf(420.dp, maxWidth * 0.38f)
             Row(Modifier.fillMaxSize().padding(horizontal = 40.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(
                     Modifier.weight(1f).fillMaxHeight(),
@@ -253,7 +256,7 @@ private fun NowPlayingContent(item: PlaybackItem) {
                     verticalArrangement = Arrangement.spacedBy(22.dp, Alignment.CenterVertically),
                 ) {
                     if (showsQueue && !wide) {
-                        QueueList(Modifier.fillMaxWidth().height(maxHeight * 0.55f))
+                        QueueList(Modifier.fillMaxWidth().height(queueHeight))
                     } else {
                         ArtworkImage(item.artworkPath, Modifier.size(cover).clip(RoundedCornerShape(14.dp)), size = "w780", placeholderIcon = Icons.Filled.MusicNote)
                     }
@@ -263,7 +266,7 @@ private fun NowPlayingContent(item: PlaybackItem) {
                     Transport(playFocus)
                 }
                 if (showsQueue && wide) {
-                    QueueList(Modifier.width(minOf(420.dp, maxWidth * 0.38f)).fillMaxHeight().padding(vertical = 60.dp))
+                    QueueList(Modifier.width(queueWidth).fillMaxHeight().padding(vertical = 60.dp))
                 }
             }
             Row(
