@@ -34,6 +34,7 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.LibraryMusic
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Movie
@@ -116,6 +117,7 @@ enum class Section(val route: String, val label: String, val icon: ImageVector, 
     TOP_RATED("toprated", "Điểm cao", Icons.Filled.Star, false),
     GENRES("genres", "Thể loại", Icons.Filled.TheaterComedy, false),
     MUSIC("music", "Nhạc", Icons.Filled.LibraryMusic, true),
+    ARTISTS("artists", "Nghệ sĩ", Icons.Filled.Mic, false),
     MUSIC_VIDEOS("musicvideos", "Video ca nhạc", Icons.Filled.MusicVideo, false),
     SOURCES("sources", "Nguồn", Icons.Filled.Storage, true),
     SETTINGS("settings", "Cài đặt", Icons.Filled.Settings, true),
@@ -148,6 +150,7 @@ class AppActions(
     }
 
     fun openDetail(itemKey: String) = nav.navigate("detail/${encode(itemKey)}")
+    fun openArtist(name: String) = nav.navigate("artist/${encode(name)}")
     fun openGrid(filter: LibraryFilter) = nav.navigate("grid/${filter.name}")
     fun openBrowser(serverID: String, path: String, title: String) =
         nav.navigate("browser/${encode(serverID)}?path=${encode(path)}&title=${encode(title)}")
@@ -337,6 +340,8 @@ private fun AppNavHost(nav: NavHostController, sidebar: Boolean) {
         composable(Section.MUSIC.route) {
             if (sidebar) com.xuanthanhtnt.xtplayer.ui.library.AlbumsScreen() else com.xuanthanhtnt.xtplayer.ui.library.MusicLibraryScreen()
         }
+        composable(Section.ARTISTS.route) { com.xuanthanhtnt.xtplayer.ui.library.ArtistsScreen() }
+        composable("artist/{name}") { entry -> com.xuanthanhtnt.xtplayer.ui.library.ArtistDetailScreen(AppActions.decode(entry.arguments?.getString("name"))) }
         composable(Section.MUSIC_VIDEOS.route) { com.xuanthanhtnt.xtplayer.ui.library.MusicVideosScreen() }
         composable(Section.SOURCES.route) { SourcesScreen() }
         composable(Section.SETTINGS.route) { SettingsScreen() }
@@ -398,6 +403,7 @@ private fun SideBar(nav: NavHostController, isTv: Boolean) {
         }
         SideHeader("Âm nhạc")
         SideItem(Section.MUSIC.icon, Section.MUSIC.label, route == Section.MUSIC.route) { actions.openSection(Section.MUSIC.route) }
+        SideItem(Section.ARTISTS.icon, Section.ARTISTS.label, route == Section.ARTISTS.route) { actions.openSection(Section.ARTISTS.route) }
         SideItem(Section.MUSIC_VIDEOS.icon, Section.MUSIC_VIDEOS.label, route == Section.MUSIC_VIDEOS.route) {
             actions.openSection(Section.MUSIC_VIDEOS.route)
         }

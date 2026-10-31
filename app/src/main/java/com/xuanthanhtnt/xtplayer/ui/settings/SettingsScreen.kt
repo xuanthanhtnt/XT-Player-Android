@@ -89,12 +89,19 @@ fun SettingsScreen() {
         section(
             "Âm thanh",
             "Tăng thoại: kênh giữa to hơn, kênh vòm và siêu trầm nhỏ lại (stereo: tách dải giọng nói). Ban đêm: nén dải động — " +
-                "tiếng nói nhỏ được nâng lên, tiếng nổ được giữ lại. Hai mục này đổi ngay cho nội dung đang phát. " +
+                "tiếng nói nhỏ được nâng lên, tiếng nổ được giữ lại. Cân bằng âm lượng: dùng thẻ ReplayGain trong file để các album " +
+                "to nhỏ như nhau (giữ chênh lệch giữa các bài trong album). Khớp tần số (Android 14 trở lên): DAC USB chạy đúng " +
+                "tần số của file (44,1 / 96 / 192 kHz), bit-perfect khi DAC cho phép, thay vì hệ thống lấy mẫu lại thành 48 kHz. " +
+                "Các mục này đổi ngay cho nội dung đang phát. " +
                 "Bitstream chỉ có tác dụng khi ampli / TV qua HDMI nhận được định dạng đó; lúc bitstream, âm lượng chỉnh trên ampli " +
                 "và tăng thoại / ban đêm không áp dụng.",
         ) {
             PrefSwitch("Tăng thoại (nghe rõ lời nói)", settings.dialogBoost)
             PrefSwitch("Chế độ ban đêm (nén dải động)", settings.nightMode)
+            PrefSwitch("Cân bằng âm lượng nhạc (ReplayGain)", settings.volumeLeveling)
+            if (com.xuanthanhtnt.xtplayer.player.HiResOutput.isAvailable) {
+                PrefSwitch("Khớp tần số lấy mẫu với DAC USB", settings.matchSampleRate)
+            }
             PrefSwitch("Bitstream TrueHD / DTS-HD / E-AC3 qua HDMI", settings.audioPassthrough)
             PrefText("Ngôn ngữ âm thanh ưu tiên (vd: vie,eng)", settings.audioLanguages)
         }

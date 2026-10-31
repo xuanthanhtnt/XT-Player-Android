@@ -33,6 +33,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -94,6 +95,7 @@ object MusicPlayer {
     private var ticker: Job? = null
     private var settingsJob: Job? = null
     private val night = NightCompressor()
+    private val replayGain = GainHolder()
     private var deviceCallback: AudioDeviceCallback? = null
 
     val current: QueueEntry? get() = queueFlow.value.getOrNull(indexFlow.value)
@@ -285,9 +287,9 @@ object MusicPlayer {
     private fun makePlayer(): ExoPlayer {
         player?.let { return it }
         val context = AppGraph.context
-        val exo = ExoPlayer.Builder(context, XtRenderersFactory(context, passthrough = false))
+        val exo = ExoPlayer.Builder(context, XtRenderersFactory(context, passthrough = false, gain = replayGain))
             .setMediaSourceFactory(
-                DefaultMediaSourceFactory(XtDataSource.Factory(context))
+                DefaultMediaSourceFactory(XtDataSource.Factory(context), XtExtractorsFactory)
                     .setLoadErrorHandlingPolicy(DefaultLoadErrorHandlingPolicy(8))
             )
             .setAudioAttributes(
@@ -318,8 +320,17 @@ object MusicPlayer {
         val settings = AppGraph.settings
         night.attach(exo.audioSessionId, settings.nightMode.value)
         settingsJob = scope.launch {
-            combine(settings.nightMode.flow, settings.dialogBoost.flow) { nightMode, _ -> nightMode }.collect { nightMode ->
-                night.setEnabled(nightMode)
+            combine(settings.nightMode.flow, settings.dialogBoost.flow, settings.volumeLeveling.flow) { nightMode, _, _ -> nightMode }
+                .collect { nightMode ->
+                    night.setEnabled(nightMode)
+                    updateSignal()
+                }
+        }
+        // A USB DAC switched to (or away from) the file's rate: the output reopens at the same spot.
+        scope.launch {
+            settings.matchSampleRate.flow.drop(1).collect {
+                HiResOutput.reapply(context)
+                player?.let { p -> p.seekTo(p.currentPosition) }
                 updateSignal()
             }
         }
@@ -365,6 +376,7 @@ object MusicPlayer {
         override fun onAudioInputFormatChanged(eventTime: AnalyticsListener.EventTime, format: Format, decoderReuseEvaluation: DecoderReuseEvaluation?) {
             val id = mediaId(eventTime) ?: return
             formats[id] = format
+            replayGain.db = ReplayGain.gainDb(format.metadata) ?: 0f
             if (id == current?.id) updateSignal()
             learnQuality(id, format)
         }
@@ -432,7 +444,7 @@ object MusicPlayer {
         val entry = queueFlow.value.firstOrNull { it.id == id } ?: return
         if (format.sampleRate <= 0) return
         val quality = SignalPath.quality(
-            PlayerEngine.codecName(format), format.sampleRate,
+            PlayerEngine.codecName(format), sourceRate(format),
             SignalPath.bitDepth(format.pcmEncoding, format.sampleMimeType, format.initializationData),
         )
         if (quality.isEmpty()) return
@@ -445,17 +457,21 @@ object MusicPlayer {
         val context = AppGraph.context
         signalFlow.value = AudioPathInput(
             codec = format?.let(PlayerEngine::codecName).orEmpty(),
-            sampleRate = format?.sampleRate?.takeIf { it > 0 } ?: 0,
+            sampleRate = format?.let(::sourceRate) ?: 0,
             bitDepth = format?.let { SignalPath.bitDepth(it.pcmEncoding, it.sampleMimeType, it.initializationData) },
             outputSampleRate = outputSampleRate,
             deviceSampleRate = AudioOutputs.mixerSampleRate(context),
             deviceName = AudioOutputs.deviceName(context),
             dialogBoost = AppGraph.settings.dialogBoost.value,
             nightMode = AppGraph.settings.nightMode.value,
+            volumeLeveling = AppGraph.settings.volumeLeveling.value,
             muted = exo?.volume == 0f,
             volume = exo?.volume ?: 1f,
         )
     }
+
+    /** The file's rate; DSD counts as FFmpeg decodes it, 1/8 of the DSD rate (DSD64 → 352.8 kHz), as in the Apple app. */
+    private fun sourceRate(format: Format): Int = DsdFormat.dsdRate(format)?.let { it / 8 } ?: format.sampleRate.coerceAtLeast(0)
 
     private fun mediaItem(entry: QueueEntry): MediaItem {
         val item = entry.item
@@ -536,8 +552,9 @@ object AudioOutputs {
 
     /** The primary output's mixer rate (usually 48 kHz): what the system resamples to. */
     fun mixerSampleRate(context: Context): Int =
-        (context.getSystemService(Context.AUDIO_SERVICE) as AudioManager)
-            .getProperty(AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE)?.toIntOrNull() ?: 0
+        HiResOutput.preferredRate(context).takeIf { it > 0 }
+            ?: (context.getSystemService(Context.AUDIO_SERVICE) as AudioManager)
+                .getProperty(AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE)?.toIntOrNull() ?: 0
 
     /** The output Android routes media to: a USB DAC before Bluetooth, wired headphones, HDMI, then the speaker. */
     fun deviceName(context: Context): String {

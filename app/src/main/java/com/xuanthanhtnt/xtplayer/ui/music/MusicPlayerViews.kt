@@ -302,6 +302,8 @@ private fun AudioOptionsDialog(onDismiss: () -> Unit) {
     val settings = com.xuanthanhtnt.xtplayer.AppGraph.settings
     val dialog by settings.dialogBoost.collect()
     val night by settings.nightMode.collect()
+    val leveling by settings.volumeLeveling.collect()
+    val match by settings.matchSampleRate.collect()
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Xử lý âm thanh", style = MaterialTheme.typography.titleMedium) },
@@ -309,6 +311,10 @@ private fun AudioOptionsDialog(onDismiss: () -> Unit) {
             Column {
                 SwitchRow("Tăng thoại", dialog, null) { settings.dialogBoost.value = it }
                 SwitchRow("Chế độ ban đêm", night, null) { settings.nightMode.value = it }
+                SwitchRow("Cân bằng âm lượng (ReplayGain)", leveling, null) { settings.volumeLeveling.value = it }
+                if (com.xuanthanhtnt.xtplayer.player.HiResOutput.isAvailable) {
+                    SwitchRow("Khớp tần số lấy mẫu với DAC USB", match, null) { settings.matchSampleRate.value = it }
+                }
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Đóng") } },
