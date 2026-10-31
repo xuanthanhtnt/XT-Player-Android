@@ -112,7 +112,7 @@ fun isSoftwareDecoder(name: String): Boolean =
     name.startsWith("c2.android.") || name.startsWith("OMX.google.") || name.contains("ffmpeg", ignoreCase = true)
 
 /** Bitstream when the sink accepts it, or force PCM (Settings ▸ Âm thanh). */
-private class XtRenderersFactory(context: Context, private val passthrough: Boolean) : DefaultRenderersFactory(context) {
+internal class XtRenderersFactory(context: Context, private val passthrough: Boolean) : DefaultRenderersFactory(context) {
     init {
         // Platform decoders first; FFmpeg (TrueHD, DTS, …) when the device has none.
         setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)

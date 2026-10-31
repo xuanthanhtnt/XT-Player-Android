@@ -44,6 +44,8 @@ class PlayerActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         PlayerLauncher.isOpen = true
+        // A video takes over: the music pauses and lends it the remote / lock-screen controls.
+        MusicPlayer.suspendForVideo()
         isTv = (getSystemService(UI_MODE_SERVICE) as UiModeManager).currentModeType == Configuration.UI_MODE_TYPE_TELEVISION ||
             packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)

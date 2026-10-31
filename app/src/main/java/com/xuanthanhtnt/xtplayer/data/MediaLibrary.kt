@@ -26,6 +26,14 @@ object MediaLibrary {
         }
     }
 
+    /** What a track turned out to be when played ("FLAC · 96 kHz · 24-bit"), kept as the file's second badge. */
+    suspend fun learnTrack(fileKey: String, quality: String) {
+        val file = dao.file(fileKey) ?: return
+        val format = file.badges.firstOrNull() ?: quality
+        if (file.badges.size >= 2 && file.badges[1] == quality) return
+        dao.upsertFile(file.copy(badges = listOf(format, quality)))
+    }
+
     suspend fun entry(key: String): MediaEntry? = dao.entry(key)
 
     /** Find or create the entry for a playback item and mark it as just played. */

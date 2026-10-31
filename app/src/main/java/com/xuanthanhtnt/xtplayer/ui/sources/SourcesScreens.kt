@@ -366,7 +366,10 @@ fun BrowserScreen(serverID: String, path: String, title: String) {
             actions.scope.launch {
                 val queue = PlaybackFactory.remote(files, subtitles, credentials)
                 val start = files.indexOf(item).coerceAtLeast(0)
-                if (queue.isNotEmpty()) actions.play(PlaybackSession(queue, start))
+                if (queue.isEmpty()) return@launch
+                // Music plays on in the music player while browsing; videos open full screen.
+                if (item.isAudio) com.xuanthanhtnt.xtplayer.player.MusicPlayer.play(queue, start)
+                else actions.play(PlaybackSession(queue, start))
             }
         }
         if (videos.isNotEmpty() && music.isNotEmpty()) item { BrowserSection("Video") }
