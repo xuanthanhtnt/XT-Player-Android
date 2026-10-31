@@ -58,6 +58,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -182,11 +183,22 @@ fun XtApp(isTv: Boolean, wide: Boolean) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var showUrl by remember { mutableStateOf(false) }
+    SideEffect { com.xuanthanhtnt.xtplayer.player.MusicPlayer.isTv = isTv }
+
+    /** Opened from the file picker or a URL: music plays in the music player, anything else full screen. */
+    fun open(item: com.xuanthanhtnt.xtplayer.player.PlaybackItem) {
+        val extension = item.fileName.substringAfterLast('.', "").lowercase()
+        if (extension in com.xuanthanhtnt.xtplayer.metadata.FilenameParser.audioExtensions) {
+            com.xuanthanhtnt.xtplayer.player.MusicPlayer.play(listOf(item))
+        } else {
+            PlayerLauncher.play(context, PlaybackSession(listOf(item)))
+        }
+    }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             runCatching { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
-            scope.launch { PlayerLauncher.play(context, PlaybackSession(listOf(PlaybackFactory.local(context, uri)))) }
+            scope.launch { open(PlaybackFactory.local(context, uri)) }
         }
     }
     var askStorage by remember { mutableStateOf(false) }
@@ -194,7 +206,7 @@ fun XtApp(isTv: Boolean, wide: Boolean) {
     val permissions = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { browseDevice() }
     val actions = remember(nav) {
         AppActions(nav, context, scope, pickFile = {
-            runCatching { picker.launch(arrayOf("video/*", "application/x-matroska", "application/octet-stream")) }
+            runCatching { picker.launch(arrayOf("video/*", "audio/*", "application/x-matroska", "application/octet-stream")) }
         }, openUrl = { showUrl = true }, openDevice = {
             when {
                 LocalStorage.hasFullAccess(context) -> browseDevice()
@@ -210,28 +222,42 @@ fun XtApp(isTv: Boolean, wide: Boolean) {
     LaunchedEffect(Unit) { AppGraph.updates.checkIfDue() }
 
     CompositionLocalProvider(LocalAppActions provides actions) {
-        if (wide || isTv) {
-            Row(
-                Modifier
-                    .fillMaxSize()
-                    .appBackground()
-                    .windowInsetsPadding(WindowInsets.systemBars)
-            ) {
-                SideBar(nav, isTv)
-                Column(Modifier.weight(1f).fillMaxHeight()) {
-                    if (canGoBack) BackBar { nav.popBackStack() }
-                    Box(Modifier.weight(1f).fillMaxWidth()) { AppNavHost(nav, sidebar = true) }
+        Box(Modifier.fillMaxSize()) {
+            if (wide || isTv) {
+                // The music bar runs under sidebar and content alike (as in Roon); the sidebar shrinks above it, so its
+                // Settings row stays visible. Apple TV has no bar: Now Playing opens instead.
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .appBackground()
+                        .windowInsetsPadding(WindowInsets.systemBars)
+                ) {
+                    Row(Modifier.weight(1f).fillMaxWidth()) {
+                        SideBar(nav, isTv)
+                        Column(Modifier.weight(1f).fillMaxHeight()) {
+                            if (canGoBack) BackBar { nav.popBackStack() }
+                            Box(Modifier.weight(1f).fillMaxWidth()) { AppNavHost(nav, sidebar = true) }
+                        }
+                    }
+                    if (!isTv) com.xuanthanhtnt.xtplayer.ui.music.MiniPlayerBar()
+                }
+            } else {
+                Scaffold(
+                    containerColor = XtColors.background,
+                    contentColor = Color.White,
+                    topBar = { if (canGoBack) BackBar(Modifier.statusBarsPadding()) { nav.popBackStack() } },
+                    // The music bar sits above the tab bar while music plays.
+                    bottomBar = {
+                        Column {
+                            com.xuanthanhtnt.xtplayer.ui.music.MiniPlayerBar()
+                            BottomBar(nav)
+                        }
+                    },
+                ) { padding ->
+                    Box(Modifier.fillMaxSize().appBackground().padding(padding)) { AppNavHost(nav, sidebar = false) }
                 }
             }
-        } else {
-            Scaffold(
-                containerColor = XtColors.background,
-                contentColor = Color.White,
-                topBar = { if (canGoBack) BackBar(Modifier.statusBarsPadding()) { nav.popBackStack() } },
-                bottomBar = { BottomBar(nav) },
-            ) { padding ->
-                Box(Modifier.fillMaxSize().appBackground().padding(padding)) { AppNavHost(nav, sidebar = false) }
-            }
+            com.xuanthanhtnt.xtplayer.ui.music.NowPlayingOverlay()
         }
         if (showUrl) {
             OpenUrlDialog(onDismiss = { showUrl = false }) { text ->
@@ -239,7 +265,7 @@ fun XtApp(isTv: Boolean, wide: Boolean) {
                     val item = PlaybackFactory.url(text)
                     if (item != null) {
                         showUrl = false
-                        actions.play(PlaybackSession(listOf(item)))
+                        open(item)
                     }
                 }
             }

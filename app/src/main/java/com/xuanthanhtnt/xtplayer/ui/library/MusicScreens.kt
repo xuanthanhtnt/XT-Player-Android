@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
@@ -27,6 +28,8 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.MusicVideo
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Shuffle
@@ -55,14 +58,16 @@ import androidx.compose.ui.unit.dp
 import com.xuanthanhtnt.xtplayer.AppGraph
 import com.xuanthanhtnt.xtplayer.core.ByteFormat
 import com.xuanthanhtnt.xtplayer.core.NaturalOrder
+import com.xuanthanhtnt.xtplayer.core.TimeFormat
 import com.xuanthanhtnt.xtplayer.data.LibraryFile
 import com.xuanthanhtnt.xtplayer.data.LibraryFolderKind
 import com.xuanthanhtnt.xtplayer.data.LibraryIndex
 import com.xuanthanhtnt.xtplayer.data.LibraryItem
 import com.xuanthanhtnt.xtplayer.data.LibraryKind
 import com.xuanthanhtnt.xtplayer.data.LibraryOrdering
+import com.xuanthanhtnt.xtplayer.data.MediaEntry
+import com.xuanthanhtnt.xtplayer.player.MusicPlayer
 import com.xuanthanhtnt.xtplayer.player.PlaybackFactory
-import com.xuanthanhtnt.xtplayer.player.PlaybackSession
 import com.xuanthanhtnt.xtplayer.ui.AppActions
 import com.xuanthanhtnt.xtplayer.ui.ArtworkImage
 import com.xuanthanhtnt.xtplayer.ui.EmptyText
@@ -70,10 +75,13 @@ import com.xuanthanhtnt.xtplayer.ui.LocalAppActions
 import com.xuanthanhtnt.xtplayer.ui.PageTitle
 import com.xuanthanhtnt.xtplayer.ui.focusClickable
 import com.xuanthanhtnt.xtplayer.ui.home.HeroButton
+import com.xuanthanhtnt.xtplayer.ui.music.NowPlayingButton
+import com.xuanthanhtnt.xtplayer.ui.music.QueueActionsDialog
 import com.xuanthanhtnt.xtplayer.ui.theme.LocalDimens
 import com.xuanthanhtnt.xtplayer.ui.theme.LocalIsTv
 import com.xuanthanhtnt.xtplayer.ui.theme.XtColors
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 // Music in the library (MusicViews.swift, v0.3.0): albums (folders of tracks from "Nhạc" library folders) and
 // music videos (files of "Video ca nhạc" folders), each with its own grid, kept apart from films and TV shows.
@@ -84,13 +92,19 @@ fun albumCardWidth(): Dp = if (LocalIsTv.current) 150.dp else 160.dp
 
 /** Square album cover with title and artist. */
 @Composable
-fun AlbumCard(item: LibraryItem, played: Boolean, modifier: Modifier = Modifier.width(albumCardWidth()), onClick: () -> Unit) {
+fun AlbumCard(
+    item: LibraryItem,
+    played: Boolean,
+    modifier: Modifier = Modifier.width(albumCardWidth()),
+    onLongClick: (() -> Unit)? = null,
+    onClick: () -> Unit,
+) {
     Column(modifier) {
         Box(
             Modifier
                 .fillMaxWidth()
                 .aspectRatio(1f)
-                .focusClickable(RoundedCornerShape(10.dp), onClick = onClick)
+                .focusClickable(RoundedCornerShape(10.dp), onLongClick = onLongClick, onClick = onClick)
         ) {
             ArtworkImage(item.posterPath, Modifier.fillMaxSize(), size = "w342", placeholderIcon = Icons.Filled.MusicNote)
             if (played) {
@@ -118,11 +132,16 @@ fun AlbumCard(item: LibraryItem, played: Boolean, modifier: Modifier = Modifier.
     }
 }
 
-/** AlbumLink: the card that opens the album page. */
+/** AlbumLink: the card that opens the album page; long press for Phát / Trộn bài / Phát tiếp / Thêm vào hàng đợi. */
 @Composable
 fun AlbumLink(item: LibraryItem, index: LibraryIndex, modifier: Modifier = Modifier.width(albumCardWidth())) {
     val actions = LocalAppActions.current
-    AlbumCard(item, played = index.progress(item).watched, modifier = modifier) { actions.openDetail(item.key) }
+    var menu by remember { mutableStateOf(false) }
+    AlbumCard(item, played = index.progress(item).watched, modifier = modifier, onLongClick = { menu = true }) { actions.openDetail(item.key) }
+    if (menu) {
+        val tracks = index.files(item).sortedWith(LibraryOrdering.episodes)
+        QueueActionsDialog(item.title, { PlaybackFactory.library(tracks, item) }) { menu = false }
+    }
 }
 
 private enum class AlbumSort(val label: String) { RECENT("Mới thêm"), ARTIST("Nghệ sĩ"), TITLE("Tên") }
@@ -155,6 +174,7 @@ fun AlbumsScreen(embedded: Boolean = false) {
         item(span = { GridItemSpan(maxLineSpan) }) {
             Column {
                 if (!embedded) PageTitle("Nhạc", inset = false)
+                if (LocalIsTv.current) Box(Modifier.padding(bottom = 12.dp)) { NowPlayingButton() }
                 if (albums.isEmpty()) {
                     MusicEmptyHint(LibraryFolderKind.MUSIC)
                 } else {
@@ -228,12 +248,16 @@ fun AlbumDetailScreen(itemKey: String) {
     val tracks = remember(files) { files.sortedWith(LibraryOrdering.episodes) }
     val entryByKey = remember(entries) { entries.associateBy { it.key } }
     val discs = remember(tracks) { tracks.mapNotNull { it.season }.toSet() }
+    val queue by MusicPlayer.queue.collectAsState()
+    val playingIndex by MusicPlayer.index.collectAsState()
+    val playingKey = queue.getOrNull(playingIndex)?.item?.key
+    var menuFor by remember { mutableStateOf<LibraryFile?>(null) }
     LazyColumn(
         Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = dimens.pagePadding, end = dimens.pagePadding, top = 16.dp, bottom = 32.dp),
     ) {
         item(key = "header") {
-            AlbumHeader(current, tracks, actions)
+            AlbumHeader(current, tracks, entryByKey, actions)
             Spacer(Modifier.height(24.dp))
         }
         itemsIndexed(tracks, key = { _, track -> track.key }) { position, track ->
@@ -249,16 +273,23 @@ fun AlbumDetailScreen(itemKey: String) {
                 number = track.episode ?: (position + 1),
                 title = track.episodeTitle ?: track.fileName,
                 format = track.badges.firstOrNull(),
+                duration = entryByKey[track.key]?.duration ?: 0.0,
                 played = entryByKey[track.key]?.isWatched ?: false,
+                playing = playingKey == track.key,
+                onLongClick = { menuFor = track },
             ) { playAlbum(current, tracks, position, actions) }
             HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
         }
     }
+    menuFor?.let { track ->
+        QueueActionsDialog(track.episodeTitle ?: track.fileName, { PlaybackFactory.library(listOf(track), current) }) { menuFor = null }
+    }
 }
 
 @Composable
-private fun AlbumHeader(album: LibraryItem, tracks: List<LibraryFile>, actions: AppActions) {
+private fun AlbumHeader(album: LibraryItem, tracks: List<LibraryFile>, entryByKey: Map<String, MediaEntry>, actions: AppActions) {
     val isTv = LocalIsTv.current
+    var more by remember { mutableStateOf(false) }
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val cover = if (isTv) 240.dp else 200.dp
         // Side by side as on the Mac and iPad; stacked on a narrow phone.
@@ -267,10 +298,23 @@ private fun AlbumHeader(album: LibraryItem, tracks: List<LibraryFile>, actions: 
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(album.title, style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold), maxLines = 2, overflow = TextOverflow.Ellipsis)
                 album.artist?.let { Text(it, style = MaterialTheme.typography.titleMedium, color = XtColors.leaf) }
-                Text(summary(album, tracks), style = MaterialTheme.typography.bodyMedium, color = XtColors.secondaryText)
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(top = 6.dp)) {
+                Text(summary(album, tracks, entryByKey), style = MaterialTheme.typography.bodyMedium, color = XtColors.secondaryText)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(top = 6.dp),
+                ) {
                     HeroButton("Phát", Icons.Filled.PlayArrow, primary = true) { playAlbum(album, tracks, 0, actions) }
-                    HeroButton("Trộn bài", Icons.Filled.Shuffle, primary = false) { playAlbum(album, tracks.shuffled(), 0, actions) }
+                    HeroButton("Trộn bài", Icons.Filled.Shuffle, primary = false) { playAlbum(album, tracks, 0, actions, shuffle = true) }
+                    Box(
+                        Modifier
+                            .size(44.dp)
+                            .focusClickable(RoundedCornerShape(12.dp), focusScale = 1.05f) { more = true }
+                            .background(Color.White.copy(alpha = 0.16f), RoundedCornerShape(12.dp)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.Filled.MoreHoriz, "Thêm", tint = Color.White)
+                    }
                 }
             }
         }
@@ -296,48 +340,93 @@ private fun AlbumHeader(album: LibraryItem, tracks: List<LibraryFile>, actions: 
             }
         }
     }
+    if (more) {
+        com.xuanthanhtnt.xtplayer.ui.ActionsDialog(
+            album.title,
+            listOf(
+                "Phát tiếp" to { actions.scope.launch { MusicPlayer.playNext(PlaybackFactory.library(tracks, album)) }; Unit },
+                "Thêm vào hàng đợi" to { actions.scope.launch { MusicPlayer.addToQueue(PlaybackFactory.library(tracks, album)) }; Unit },
+            ),
+        ) { more = false }
+    }
 }
 
-/** "2019 · 12 bài · FLAC · 412 MB". */
-private fun summary(album: LibraryItem, tracks: List<LibraryFile>): String {
+/** "2024 · 3 bài · 42 phút · FLAC · 96 kHz · 24-bit · 812 MB" (the quality once a track has been played). */
+private fun summary(album: LibraryItem, tracks: List<LibraryFile>, entryByKey: Map<String, MediaEntry>): String {
     val parts = mutableListOf<String>()
     album.year?.let { parts += it.toString() }
     parts += "${tracks.size} bài"
+    val durations = tracks.mapNotNull { entryByKey[it.key]?.duration }.filter { it > 1 }
+    if (durations.size == tracks.size && durations.isNotEmpty()) {
+        val total = durations.sum()
+        parts += if (total >= 60) "${(total / 60).roundToInt()} phút" else "${total.toInt()} giây"
+    }
+    val qualities = tracks.mapNotNull { it.badges.getOrNull(1) }.toSortedSet()
     val formats = tracks.mapNotNull { it.badges.firstOrNull() }.toSortedSet()
-    if (formats.isNotEmpty()) parts += formats.joinToString(" / ")
+    if (qualities.size == 1) parts += qualities.first() else if (formats.isNotEmpty()) parts += formats.joinToString(" / ")
     parts += ByteFormat.file(tracks.sumOf { it.size })
     return parts.joinToString(" · ")
 }
 
-private fun playAlbum(album: LibraryItem, tracks: List<LibraryFile>, from: Int, actions: AppActions) {
+/** Plays the album in the music player from a track (or shuffled). */
+private fun playAlbum(album: LibraryItem, tracks: List<LibraryFile>, from: Int, actions: AppActions, shuffle: Boolean = false) {
     actions.scope.launch {
         val queue = PlaybackFactory.library(tracks, album)
-        if (queue.isEmpty()) return@launch
-        actions.play(PlaybackSession(queue, minOf(from, queue.size - 1)))
+        MusicPlayer.play(queue, startAt = from, shuffle = shuffle)
     }
 }
 
 @Composable
-private fun TrackRow(number: Int, title: String, format: String?, played: Boolean, onClick: () -> Unit) {
+private fun TrackRow(
+    number: Int,
+    title: String,
+    format: String?,
+    duration: Double,
+    played: Boolean,
+    playing: Boolean,
+    onLongClick: () -> Unit,
+    onClick: () -> Unit,
+) {
     Row(
         Modifier
             .fillMaxWidth()
-            .focusClickable(RoundedCornerShape(8.dp), focusScale = 1.02f, onClick = onClick)
+            .focusClickable(RoundedCornerShape(8.dp), focusScale = 1.02f, onLongClick = onLongClick, onClick = onClick)
             .padding(vertical = 10.dp, horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
+        Box(Modifier.width(30.dp), contentAlignment = Alignment.CenterEnd) {
+            if (playing) {
+                Icon(Icons.Filled.GraphicEq, "Đang phát", tint = XtColors.leaf, modifier = Modifier.size(18.dp))
+            } else {
+                Text(
+                    "$number",
+                    style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+                    color = XtColors.secondaryText,
+                    textAlign = TextAlign.End,
+                )
+            }
+        }
         Text(
-            "$number",
-            style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
-            color = XtColors.secondaryText,
-            textAlign = TextAlign.End,
-            modifier = Modifier.width(30.dp),
+            title,
+            style = MaterialTheme.typography.bodyLarge.copy(fontWeight = if (playing) FontWeight.SemiBold else FontWeight.Normal),
+            color = if (playing) XtColors.leaf else Color.White,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
         )
-        Text(title, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
         if (played) Icon(Icons.Filled.Check, "Đã nghe", tint = XtColors.leaf, modifier = Modifier.size(16.dp))
         if (format != null) {
             Text(format, style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold), color = XtColors.secondaryText)
+        }
+        if (duration > 1) {
+            Text(
+                TimeFormat.clock(duration),
+                style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+                color = XtColors.secondaryText,
+                textAlign = TextAlign.End,
+                modifier = Modifier.widthIn(min = 44.dp),
+            )
         }
     }
 }

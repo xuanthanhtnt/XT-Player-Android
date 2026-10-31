@@ -7,6 +7,9 @@
     <!-- Bonjour / mDNS discovery of NAS shares. -->
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Music keeps playing in the background (MusicService). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <!-- In-app updates from GitHub Releases. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- Browsing videos on this device, SD cards and USB drives (Sources ▸ Thiết bị này). -->
@@ -76,6 +79,15 @@
             </intent-filter>
         </activity>
 
+        <!-- Background music: the media session, notification and lock-screen controls of the music player. -->
+        <service
+            android:name=".player.MusicService"
+            android:exported="true"
+            android:foregroundServiceType="mediaPlayback">
+            <intent-filter>
+                <action android:name="androidx.media3.session.MediaSessionService" />
+            </intent-filter>
+        </service>
 
         <!-- Google Cast (Chromecast / Google TV): Media3's options with the Default Media Receiver. -->
         <meta-data
