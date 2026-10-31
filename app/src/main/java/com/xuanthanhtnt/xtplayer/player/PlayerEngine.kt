@@ -112,7 +112,11 @@ fun isSoftwareDecoder(name: String): Boolean =
     name.startsWith("c2.android.") || name.startsWith("OMX.google.") || name.contains("ffmpeg", ignoreCase = true)
 
 /** Bitstream when the sink accepts it, or force PCM (Settings ▸ Âm thanh). */
-internal class XtRenderersFactory(context: Context, private val passthrough: Boolean) : DefaultRenderersFactory(context) {
+internal class XtRenderersFactory(
+    context: Context,
+    private val passthrough: Boolean,
+    private val gain: GainHolder = GainHolder(),
+) : DefaultRenderersFactory(context) {
     private val appContext = context.applicationContext
 
     init {
@@ -131,7 +135,7 @@ internal class XtRenderersFactory(context: Context, private val passthrough: Boo
         @Suppress("DEPRECATION")
         if (!passthrough) builder.setAudioCapabilities(AudioCapabilities.DEFAULT_AUDIO_CAPABILITIES)
         // Dialogue boost (and the channel side of night mode) in front of the sink, on every PCM path.
-        return XtAudioSink(builder.build(), appContext)
+        return XtAudioSink(builder.build(), appContext, gain)
     }
 }
 
@@ -140,6 +144,7 @@ class PlayerEngine(context: Context) {
     private val settings = AppGraph.settings
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val night = NightCompressor()
+    private val replayGain = GainHolder()
 
     private val trackSelector = DefaultTrackSelector(context)
     val player: ExoPlayer
@@ -223,6 +228,7 @@ class PlayerEngine(context: Context) {
 
         override fun onAudioInputFormatChanged(eventTime: AnalyticsListener.EventTime, format: Format, decoderReuseEvaluation: DecoderReuseEvaluation?) {
             audioFlow.value = audioSignalFor(format)
+            replayGain.db = ReplayGain.gainDb(format.metadata) ?: 0f
         }
 
         override fun onAudioTrackInitialized(eventTime: AnalyticsListener.EventTime, audioTrackConfig: AudioSink.AudioTrackConfig) {
@@ -253,11 +259,11 @@ class PlayerEngine(context: Context) {
             .setPrioritizeTimeOverSizeThresholds(false)
             .setBackBuffer(15_000, true)
             .build()
-        player = ExoPlayer.Builder(context, XtRenderersFactory(context, settings.audioPassthrough.value))
+        player = ExoPlayer.Builder(context, XtRenderersFactory(context, settings.audioPassthrough.value, replayGain))
             .setTrackSelector(trackSelector)
             .setLoadControl(loadControl)
             .setMediaSourceFactory(
-                DefaultMediaSourceFactory(XtDataSource.Factory(context))
+                DefaultMediaSourceFactory(XtDataSource.Factory(context), XtExtractorsFactory)
                     .setLoadErrorHandlingPolicy(androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy(8))
             )
             .setAudioAttributes(
@@ -473,6 +479,7 @@ class PlayerEngine(context: Context) {
         } + (error.cause?.message?.let { "\n$it" } ?: "")
 
         fun codecName(format: Format): String {
+            if (DsdFormat.dsdRate(format) != null) return "DSD"
             val mime = if (format.sampleMimeType == MimeTypes.APPLICATION_MEDIA3_CUES) format.codecs ?: "" else format.sampleMimeType ?: ""
             return when (mime) {
                 MimeTypes.AUDIO_TRUEHD -> "TrueHD"

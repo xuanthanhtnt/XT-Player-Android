@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.MusicVideo
 import androidx.compose.material.icons.filled.PlayArrow
@@ -46,6 +47,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -55,10 +57,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.xuanthanhtnt.xtplayer.AppGraph
 import com.xuanthanhtnt.xtplayer.core.ByteFormat
 import com.xuanthanhtnt.xtplayer.core.NaturalOrder
 import com.xuanthanhtnt.xtplayer.core.TimeFormat
+import com.xuanthanhtnt.xtplayer.data.Artists
 import com.xuanthanhtnt.xtplayer.data.LibraryFile
 import com.xuanthanhtnt.xtplayer.data.LibraryFolderKind
 import com.xuanthanhtnt.xtplayer.data.LibraryIndex
@@ -188,20 +192,128 @@ fun AlbumsScreen(embedded: Boolean = false) {
     }
 }
 
-/** MusicLibraryView: the phone's "Nhạc" tab, albums or music videos. */
+/** MusicLibraryView: the phone's "Nhạc" tab, albums, artists or music videos. */
 @Composable
 fun MusicLibraryScreen() {
-    var showVideos by rememberSaveable { mutableStateOf(false) }
+    var page by rememberSaveable { mutableStateOf(0) }
     val dimens = LocalDimens.current
     Column(Modifier.fillMaxSize()) {
         PageTitle("Nhạc")
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(horizontal = dimens.pagePadding).padding(bottom = 12.dp)) {
-            SortChip("Album", !showVideos) { showVideos = false }
-            SortChip("Video ca nhạc", showVideos) { showVideos = true }
+            listOf("Album", "Nghệ sĩ", "Video ca nhạc").forEachIndexed { i, label -> SortChip(label, page == i) { page = i } }
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
-            if (showVideos) MusicVideosScreen(embedded = true) else AlbumsScreen(embedded = true)
+            when (page) {
+                1 -> ArtistsScreen(embedded = true)
+                2 -> MusicVideosScreen(embedded = true)
+                else -> AlbumsScreen(embedded = true)
+            }
         }
+    }
+}
+
+/** ArtistsView: album artists, each with their albums; initials when there is no picture. */
+@Composable
+fun ArtistsScreen(embedded: Boolean = false) {
+    val all by remember { AppGraph.dao.itemsFlow() }.collectAsState(initial = emptyList())
+    val actions = LocalAppActions.current
+    val dimens = LocalDimens.current
+    val artists = remember(all) { all.filter { it.kind == LibraryKind.ALBUM }.groupBy(Artists::name) }
+    val names = remember(artists) { artists.keys.sortedWith { a, b -> NaturalOrder.compare(a, b) } }
+    LazyVerticalGrid(
+        columns = GridCells.Adaptive(albumCardWidth()),
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = dimens.pagePadding, end = dimens.pagePadding, bottom = 32.dp),
+        horizontalArrangement = Arrangement.spacedBy(dimens.gridSpacing),
+        verticalArrangement = Arrangement.spacedBy(dimens.gridSpacing),
+    ) {
+        item(span = { GridItemSpan(maxLineSpan) }) {
+            Column {
+                if (!embedded) PageTitle("Nghệ sĩ", inset = false)
+                if (names.isEmpty()) {
+                    MusicEmptyHint(LibraryFolderKind.MUSIC)
+                } else {
+                    Text("${names.size} nghệ sĩ", style = MaterialTheme.typography.bodyMedium, color = XtColors.secondaryText)
+                }
+            }
+        }
+        items(names, key = { it }) { name ->
+            ArtistCard(name, artists[name].orEmpty(), Modifier.fillMaxWidth()) { actions.openArtist(name) }
+        }
+    }
+}
+
+@Composable
+private fun ArtistCard(name: String, albums: List<LibraryItem>, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    val width = albumCardWidth()
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f)
+                .focusClickable(androidx.compose.foundation.shape.CircleShape, onClick = onClick)
+                .background(Color.White.copy(alpha = 0.07f), androidx.compose.foundation.shape.CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            albums.firstOrNull { com.xuanthanhtnt.xtplayer.metadata.ThumbnailStore.isUsable(it.posterPath) }?.posterPath?.let { cover ->
+                ArtworkImage(
+                    cover,
+                    Modifier.fillMaxSize().clip(androidx.compose.foundation.shape.CircleShape).alpha(0.35f),
+                    size = "w342",
+                    placeholderIcon = Icons.Filled.Mic,
+                )
+            }
+            Text(
+                Artists.initials(name),
+                fontFamily = FontFamily.Serif,
+                fontSize = (width.value * 0.28f).sp,
+                color = Color.White,
+            )
+        }
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text("${albums.size} album", style = MaterialTheme.typography.bodySmall, color = XtColors.secondaryText)
+        }
+    }
+}
+
+/** ArtistDetailView: one artist's albums, newest first, and "Trộn tất cả". */
+@Composable
+fun ArtistDetailScreen(name: String) {
+    val dao = AppGraph.dao
+    val all by remember { dao.itemsFlow() }.collectAsState(initial = emptyList())
+    val files by remember { dao.filesFlow() }.collectAsState(initial = emptyList())
+    val entries by remember { dao.entriesFlow() }.collectAsState(initial = emptyList())
+    val index = remember(files, entries) { LibraryIndex(files, entries) }
+    val actions = LocalAppActions.current
+    val dimens = LocalDimens.current
+    val albums = remember(all, name) {
+        all.filter { it.kind == LibraryKind.ALBUM && Artists.name(it) == name }.sortedByDescending { it.year ?: 0 }
+    }
+    LazyVerticalGrid(
+        columns = GridCells.Adaptive(albumCardWidth()),
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = dimens.pagePadding, end = dimens.pagePadding, bottom = 32.dp),
+        horizontalArrangement = Arrangement.spacedBy(dimens.gridSpacing),
+        verticalArrangement = Arrangement.spacedBy(dimens.gridSpacing),
+    ) {
+        item(span = { GridItemSpan(maxLineSpan) }) {
+            Column {
+                PageTitle(name, inset = false)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(bottom = 8.dp)) {
+                    Text("${albums.size} album", style = MaterialTheme.typography.bodyMedium, color = XtColors.secondaryText)
+                    HeroButton("Trộn tất cả", Icons.Filled.Shuffle, primary = true) {
+                        actions.scope.launch {
+                            val tracks = albums.flatMap { album ->
+                                PlaybackFactory.library(index.files(album).sortedWith(LibraryOrdering.episodes), album)
+                            }
+                            MusicPlayer.play(tracks, shuffle = true)
+                        }
+                    }
+                }
+            }
+        }
+        items(albums, key = { it.key }) { AlbumLink(it, index, Modifier.fillMaxWidth()) }
     }
 }
 

@@ -65,6 +65,10 @@ class AppSettings(context: Context) {
     val dialogBoost = bool("audio.dialogBoost", false)
     /** Quiet passages raised, explosions held back. */
     val nightMode = bool("audio.nightMode", false)
+    /** ReplayGain album gain from the files' tags (music sounds equally loud from album to album). */
+    val volumeLeveling = bool("audio.volumeLeveling", false)
+    /** Android 14+: a USB DAC runs at the file's own rate (bit-perfect when it can). */
+    val matchSampleRate = bool("audio.matchSampleRate", false)
     val subtitleScale = float("subtitles.scale", 1f)
     /** 100 = at the bottom, 94 = a little higher, 60 = middle of the screen. */
     val subtitlePosition = int("subtitles.position", 100)

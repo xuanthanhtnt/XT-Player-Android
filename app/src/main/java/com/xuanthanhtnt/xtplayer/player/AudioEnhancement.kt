@@ -176,11 +176,11 @@ class ChannelEnhancer {
 }
 
 /**
- * The audio sink with [ChannelEnhancer] in front: what the decoder hands over is enhanced before the sink (and its
+ * The audio sink with [ChannelEnhancer] and the ReplayGain in front: what the decoder hands over is processed before the sink (and its
  * float path for hi-res, where Media3 runs no audio processors) gets it. Reads the settings at every buffer, so a
  * switch in Settings or Now Playing changes what is playing right away. Bitstreamed audio passes untouched.
  */
-internal class XtAudioSink(sink: AudioSink, private val context: Context) : ForwardingAudioSink(sink) {
+internal class XtAudioSink(sink: AudioSink, private val context: Context, private val gain: GainHolder) : ForwardingAudioSink(sink) {
     private var encoding = C.ENCODING_INVALID
     private var channels = 0
     private var sampleRate = 0
@@ -198,6 +198,8 @@ internal class XtAudioSink(sink: AudioSink, private val context: Context) : Forw
         channels = inputFormat.channelCount
         sampleRate = inputFormat.sampleRate
         this.outputChannels = AudioOutputs.outputChannels(context, channels)
+        // Before the output opens: a USB DAC can be asked for the file's rate.
+        if (encoding != C.ENCODING_INVALID) HiResOutput.follow(context, sampleRate, channels, HiResOutput.isHighResolution(encoding))
         enhancer.reset()
         lastInput = null
         pending = null
@@ -211,7 +213,8 @@ internal class XtAudioSink(sink: AudioSink, private val context: Context) : Forw
             lastTimeUs = presentationTimeUs
             val settings = AppGraph.settings
             val plan = AudioEnhancement.plan(settings.nightMode.value, settings.dialogBoost.value, channels, outputChannels)
-            pending = if (plan != AudioEnhancement.Plan.None && bytesPerSample() > 0) enhanced(buffer, plan) else null
+            val factor = if (settings.volumeLeveling.value && gain.db != 0f) ReplayGain.factor(gain.db) else 1f
+            pending = if ((plan != AudioEnhancement.Plan.None || factor != 1f) && bytesPerSample() > 0) enhanced(buffer, plan, factor) else null
         }
         val done = super.handleBuffer(pending ?: buffer, presentationTimeUs, encodedAccessUnitCount)
         if (done) {
@@ -241,7 +244,7 @@ internal class XtAudioSink(sink: AudioSink, private val context: Context) : Forw
         else -> 0
     }
 
-    private fun enhanced(input: ByteBuffer, plan: AudioEnhancement.Plan): ByteBuffer {
+    private fun enhanced(input: ByteBuffer, plan: AudioEnhancement.Plan, factor: Float): ByteBuffer {
         val size = input.remaining()
         val width = bytesPerSample()
         val samples = size / width
@@ -249,7 +252,7 @@ internal class XtAudioSink(sink: AudioSink, private val context: Context) : Forw
         if (scratch.size < samples) scratch = FloatArray(samples)
         val source = input.duplicate().order(ByteOrder.LITTLE_ENDIAN)
         PcmSamples.read(source, encoding, scratch, samples)
-        enhancer.process(scratch, frames, channels, sampleRate, plan, 1f)
+        enhancer.process(scratch, frames, channels, sampleRate, plan, factor)
         val target = out?.takeIf { it.capacity() >= size } ?: ByteBuffer.allocateDirect(size).also { out = it }
         target.clear()
         target.order(ByteOrder.LITTLE_ENDIAN)
