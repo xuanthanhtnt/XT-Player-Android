@@ -1190,10 +1190,8 @@ private fun DecoderSwitch(engine: PlayerEngine) {
             Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(12.dp))
-                .clickable {
-                    AppGraph.settings.hardwareDecoding.value = !hardware
-                    controller?.retry()
-                }
+                // The controller reloads at the same spot when the setting changes.
+                .clickable { AppGraph.settings.hardwareDecoding.value = !hardware }
                 .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {

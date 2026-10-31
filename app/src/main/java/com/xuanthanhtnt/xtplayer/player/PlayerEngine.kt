@@ -113,6 +113,8 @@ fun isSoftwareDecoder(name: String): Boolean =
 
 /** Bitstream when the sink accepts it, or force PCM (Settings ▸ Âm thanh). */
 internal class XtRenderersFactory(context: Context, private val passthrough: Boolean) : DefaultRenderersFactory(context) {
+    private val appContext = context.applicationContext
+
     init {
         // Platform decoders first; FFmpeg (TrueHD, DTS, …) when the device has none.
         setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
@@ -128,7 +130,8 @@ internal class XtRenderersFactory(context: Context, private val passthrough: Boo
             .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
         @Suppress("DEPRECATION")
         if (!passthrough) builder.setAudioCapabilities(AudioCapabilities.DEFAULT_AUDIO_CAPABILITIES)
-        return builder.build()
+        // Dialogue boost (and the channel side of night mode) in front of the sink, on every PCM path.
+        return XtAudioSink(builder.build(), appContext)
     }
 }
 
@@ -136,6 +139,7 @@ internal class XtRenderersFactory(context: Context, private val passthrough: Boo
 class PlayerEngine(context: Context) {
     private val settings = AppGraph.settings
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val night = NightCompressor()
 
     private val trackSelector = DefaultTrackSelector(context)
     val player: ExoPlayer
@@ -178,6 +182,8 @@ class PlayerEngine(context: Context) {
     val droppedFrames: StateFlow<Int> = droppedFlow
 
     private val listener = object : Player.Listener {
+        override fun onAudioSessionIdChanged(audioSessionId: Int) = night.attach(audioSessionId, settings.nightMode.value)
+
         override fun onPlaybackStateChanged(playbackState: Int) {
             refreshPosition()
             updateState()
@@ -269,6 +275,9 @@ class PlayerEngine(context: Context) {
             .build()
         player.addListener(listener)
         player.addAnalyticsListener(analytics)
+        // Night mode follows Settings while the video plays.
+        night.attach(player.audioSessionId, settings.nightMode.value)
+        scope.launch { settings.nightMode.flow.collect { night.setEnabled(it) } }
         scope.launch {
             var tick = 0
             while (isActive) {
@@ -366,6 +375,7 @@ class PlayerEngine(context: Context) {
 
     fun release() {
         scope.cancel()
+        night.release()
         player.removeListener(listener)
         player.release()
     }

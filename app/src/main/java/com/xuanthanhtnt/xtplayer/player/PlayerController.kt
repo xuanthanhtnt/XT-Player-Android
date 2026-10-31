@@ -9,6 +9,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -54,6 +55,8 @@ class PlayerController(
     fun start() {
         load(indexState.value)
         scope.launch { engine.state.collect { onState(it) } }
+        // Hardware decoding switched in Settings (or in the player's Video panel): reload at the same spot.
+        scope.launch { AppGraph.settings.hardwareDecoding.flow.drop(1).collect { retry() } }
         // The duration often arrives just after "playing": send the start then (PlayerScreen.swift onChange).
         scope.launch {
             engine.duration.collect { duration ->

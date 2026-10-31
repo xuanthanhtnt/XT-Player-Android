@@ -32,6 +32,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -91,6 +92,8 @@ object MusicPlayer {
     private val formats = mutableMapOf<String, Format>()
     private var outputSampleRate = 0
     private var ticker: Job? = null
+    private var settingsJob: Job? = null
+    private val night = NightCompressor()
     private var deviceCallback: AudioDeviceCallback? = null
 
     val current: QueueEntry? get() = queueFlow.value.getOrNull(indexFlow.value)
@@ -263,6 +266,9 @@ object MusicPlayer {
         player = null
         ticker?.cancel()
         ticker = null
+        settingsJob?.cancel()
+        settingsJob = null
+        night.release()
         deviceCallback?.let { audioManager().unregisterAudioDeviceCallback(it) }
         deviceCallback = null
         queueFlow.value = emptyList()
@@ -308,6 +314,15 @@ object MusicPlayer {
         }
         audioManager().registerAudioDeviceCallback(callback, Handler(Looper.getMainLooper()))
         deviceCallback = callback
+        // Dialogue boost, night mode: applied by the sink at once; the light shows them.
+        val settings = AppGraph.settings
+        night.attach(exo.audioSessionId, settings.nightMode.value)
+        settingsJob = scope.launch {
+            combine(settings.nightMode.flow, settings.dialogBoost.flow) { nightMode, _ -> nightMode }.collect { nightMode ->
+                night.setEnabled(nightMode)
+                updateSignal()
+            }
+        }
         // The media session (notification, lock screen, headset buttons) and background playback.
         runCatching { context.startService(Intent(context, MusicService::class.java)) }
         return exo
@@ -342,6 +357,8 @@ object MusicPlayer {
         }
 
         override fun onVolumeChanged(volume: Float) = updateSignal()
+
+        override fun onAudioSessionIdChanged(audioSessionId: Int) = night.attach(audioSessionId, AppGraph.settings.nightMode.value)
     }
 
     private val analytics = object : AnalyticsListener {
@@ -433,6 +450,8 @@ object MusicPlayer {
             outputSampleRate = outputSampleRate,
             deviceSampleRate = AudioOutputs.mixerSampleRate(context),
             deviceName = AudioOutputs.deviceName(context),
+            dialogBoost = AppGraph.settings.dialogBoost.value,
+            nightMode = AppGraph.settings.nightMode.value,
             muted = exo?.volume == 0f,
             volume = exo?.volume ?: 1f,
         )
@@ -498,6 +517,23 @@ object MusicQueue {
 
 /** Which output the sound goes to, as far as Android tells an app. */
 object AudioOutputs {
+    /**
+     * Channels the output takes for a source of [source] channels: a receiver or TV on HDMI (or a digital line out)
+     * that reports more than two keeps the layout; speakers, headphones and Bluetooth get stereo.
+     */
+    fun outputChannels(context: Context, source: Int): Int {
+        if (source <= 2) return source
+        val manager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val device = manager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).maxByOrNull { priority(it.type) } ?: return 2
+        val multichannel = device.type in setOf(
+            AudioDeviceInfo.TYPE_HDMI, AudioDeviceInfo.TYPE_HDMI_ARC, AudioDeviceInfo.TYPE_HDMI_EARC, AudioDeviceInfo.TYPE_LINE_DIGITAL,
+        )
+        if (!multichannel) return 2
+        // An empty list means any channel count.
+        val counts = device.channelCounts
+        return if (counts.isEmpty()) source else minOf(source, counts.max()).takeIf { it > 2 } ?: 2
+    }
+
     /** The primary output's mixer rate (usually 48 kHz): what the system resamples to. */
     fun mixerSampleRate(context: Context): Int =
         (context.getSystemService(Context.AUDIO_SERVICE) as AudioManager)
