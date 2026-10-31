@@ -154,7 +154,11 @@ data class MediaEntry(
 
     /** Where playback should start: resume unless the item was (nearly) finished. */
     val resumePosition: Double?
-        get() = if (position > 30 && (duration <= 0 || position < duration - 60)) position else null
+        get() = if (position > 30 && !isWatched) position else null
 
-    val isWatched: Boolean get() = duration > 0 && position >= duration - 60
+    /** Finished: the last minute reached, or 90 % (end credits of a film, the outro of a music video). */
+    val isWatched: Boolean get() = duration > 0 && (position >= duration - 60 || position >= duration * 0.9)
+
+    /** Opened and played for a while, finished or not ("Unwatched" leaves these out, like Infuse). */
+    val isStarted: Boolean get() = position > 10 || isWatched
 }

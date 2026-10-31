@@ -282,6 +282,31 @@ private fun TraktSection() {
             }
         }
         if (status.isNotEmpty()) Text(status, style = MaterialTheme.typography.bodySmall, color = XtColors.secondaryText)
+        val lastSync by trakt.lastSync.collectAsState()
+        lastSync?.let { time ->
+            Text(
+                "Đồng bộ lần cuối: ${java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(time))} · " +
+                    "tự đồng bộ khi mở app, khi đóng trình phát và mỗi 15 phút",
+                style = MaterialTheme.typography.bodySmall,
+                color = XtColors.secondaryText,
+            )
+        }
+        Text(
+            "Đồng bộ đã xem và điểm xem tiếp giữa máy này, Mac, iPhone, Apple TV (và Infuse nếu cũng nối Trakt). Chỉ phim và tập phim " +
+                "có trên Trakt mới đồng bộ được — video ca nhạc, concert, video gia đình thì không. Lỗi gửi lên Trakt (nếu có) nằm trong " +
+                "Nhật ký Trakt (dòng [trakt]).",
+            style = MaterialTheme.typography.bodySmall,
+            color = XtColors.secondaryText,
+        )
+        var showLog by remember { mutableStateOf(false) }
+        OutlinedButton(onClick = { showLog = true }) { Text("Nhật ký Trakt") }
+        if (showLog) {
+            val lines = com.xuanthanhtnt.xtplayer.core.AppLog.snapshot().filter { it.contains("[trakt]") }
+            com.xuanthanhtnt.xtplayer.ui.CrashReportDialog(
+                lines.joinToString("\n").ifEmpty { "Chưa có dòng nào." },
+                title = "Nhật ký Trakt",
+            ) { showLog = false }
+        }
         if (!hasClient && advanced) {
             Text(
                 "Bản cài này chưa có sẵn ứng dụng Trakt. Tạo một lần tại trakt.tv/oauth/applications/new (Redirect URI: http://localhost), " +

@@ -132,6 +132,8 @@ class LibraryScanner {
             scanning.value = false
         }
         AppGraph.scope.launch { generateMissingArtwork() }
+        // New library files may be ones Trakt already has as watched.
+        AppGraph.scope.launch { AppGraph.trakt.sync() }
     }
 
     /**

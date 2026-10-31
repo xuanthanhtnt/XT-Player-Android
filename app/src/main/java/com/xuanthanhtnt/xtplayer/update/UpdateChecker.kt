@@ -67,6 +67,9 @@ class UpdateChecker {
             return false
         }
 
+        /** App releases only: "v0.2.8". Other tags on the repository (prebuilt FFmpeg for the build) are not updates. */
+        fun isAppRelease(tag: String): Boolean = tag.startsWith("v")
+
         private const val LAST_CHECK_KEY = "update.lastCheck"
         private const val SKIPPED_KEY = "update.skippedVersion"
     }
@@ -195,7 +198,7 @@ class UpdateChecker {
             response.body?.string().orEmpty()
         }
         LenientJson.decodeFromString(kotlinx.serialization.builtins.ListSerializer(GitHubRelease.serializer()), text)
-            .filter { !it.draft }
+            .filter { !it.draft && isAppRelease(it.tagName) }
             .map { raw ->
                 val asset = raw.assets.firstOrNull { it.name.lowercase().endsWith(".apk") }
                 Release(

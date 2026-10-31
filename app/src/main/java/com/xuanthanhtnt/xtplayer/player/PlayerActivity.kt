@@ -43,6 +43,7 @@ class PlayerActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        PlayerLauncher.isOpen = true
         isTv = (getSystemService(UI_MODE_SERVICE) as UiModeManager).currentModeType == Configuration.UI_MODE_TYPE_TELEVISION ||
             packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -217,6 +218,15 @@ class PlayerActivity : ComponentActivity() {
         mediaSession?.release()
         engine?.release()
         if (switchedMode) DisplayModeMatcher.reset(this)
+        if (isFinishing) {
+            PlayerLauncher.isOpen = false
+            AppGraph.scope.launch {
+                AppGraph.scanner.generateMissingArtwork()
+                // Give Trakt a moment to file the stop scrobble, then pull what changed meanwhile.
+                kotlinx.coroutines.delay(3000)
+                AppGraph.trakt.sync()
+            }
+        }
         super.onDestroy()
     }
 
