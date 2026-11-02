@@ -323,6 +323,7 @@ object MusicPlayer {
             combine(settings.nightMode.flow, settings.dialogBoost.flow, settings.volumeLeveling.flow) { nightMode, _, _ -> nightMode }
                 .collect { nightMode ->
                     night.setEnabled(nightMode)
+                    applyLevelling()
                     updateSignal()
                 }
         }
@@ -377,15 +378,51 @@ object MusicPlayer {
             val id = mediaId(eventTime) ?: return
             formats[id] = format
             replayGain.db = ReplayGain.gainDb(format.metadata) ?: 0f
+            applyLevelling()
+            log(
+                "input ${PlayerEngine.codecName(format)} ${format.sampleRate} Hz, ${format.channelCount} ch, " +
+                    "pcm ${format.pcmEncoding}, ReplayGain ${replayGain.db} dB",
+            )
             if (id == current?.id) updateSignal()
             learnQuality(id, format)
         }
 
         override fun onAudioTrackInitialized(eventTime: AnalyticsListener.EventTime, audioTrackConfig: AudioSink.AudioTrackConfig) {
             outputSampleRate = audioTrackConfig.sampleRate
+            log(
+                "output ${audioTrackConfig.sampleRate} Hz, encoding ${audioTrackConfig.encoding}, " +
+                    "channels 0x${Integer.toHexString(audioTrackConfig.channelConfig)}, buffer ${audioTrackConfig.bufferSize} B",
+            )
             updateSignal()
         }
+
+        // Diagnostics for crackles: the output ran dry, or the sink failed.
+        override fun onAudioUnderrun(eventTime: AnalyticsListener.EventTime, bufferSize: Int, bufferSizeMs: Long, elapsedSinceLastFeedMs: Long) {
+            log("underrun: buffer $bufferSizeMs ms, $elapsedSinceLastFeedMs ms since the last write")
+        }
+
+        override fun onAudioSinkError(eventTime: AnalyticsListener.EventTime, audioSinkError: Exception) {
+            log("sink error: ${audioSinkError.message ?: audioSinkError}")
+        }
+
+        override fun onAudioCodecError(eventTime: AnalyticsListener.EventTime, audioCodecError: Exception) {
+            log("decoder error: ${audioCodecError.message ?: audioCodecError}")
+        }
     }
+
+    private fun log(message: String) = com.xuanthanhtnt.xtplayer.core.AppLog.append("[audio] $message")
+
+    /**
+     * ReplayGain lowers through the player's volume, as the output scales it, with no sample processing (nearly
+     * every album gain is negative); a positive gain is applied by the audio sink.
+     */
+    private fun applyLevelling() {
+        val exo = player ?: return
+        exo.volume = levellingFactor()
+    }
+
+    private fun levellingFactor(): Float =
+        if (AppGraph.settings.volumeLeveling.value && replayGain.db < 0f) ReplayGain.factor(replayGain.db) else 1f
 
     private fun mediaId(eventTime: AnalyticsListener.EventTime): String? {
         val timeline = eventTime.timeline
@@ -466,7 +503,8 @@ object MusicPlayer {
             nightMode = AppGraph.settings.nightMode.value,
             volumeLeveling = AppGraph.settings.volumeLeveling.value,
             muted = exo?.volume == 0f,
-            volume = exo?.volume ?: 1f,
+            // The app's own volume, without the ReplayGain part of it.
+            volume = (exo?.volume ?: 1f) / levellingFactor(),
         )
     }
 

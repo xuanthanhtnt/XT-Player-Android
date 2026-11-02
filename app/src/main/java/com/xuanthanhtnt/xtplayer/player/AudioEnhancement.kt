@@ -213,7 +213,8 @@ internal class XtAudioSink(sink: AudioSink, private val context: Context, privat
             lastTimeUs = presentationTimeUs
             val settings = AppGraph.settings
             val plan = AudioEnhancement.plan(settings.nightMode.value, settings.dialogBoost.value, channels, outputChannels)
-            val factor = if (settings.volumeLeveling.value && gain.db != 0f) ReplayGain.factor(gain.db) else 1f
+            // Lowering is the player's volume (MusicPlayer / PlayerEngine); only a boost needs the samples changed.
+            val factor = if (settings.volumeLeveling.value && gain.db > 0f) ReplayGain.factor(gain.db) else 1f
             pending = if ((plan != AudioEnhancement.Plan.None || factor != 1f) && bytesPerSample() > 0) enhanced(buffer, plan, factor) else null
         }
         val done = super.handleBuffer(pending ?: buffer, presentationTimeUs, encodedAccessUnitCount)
@@ -307,11 +308,35 @@ object PcmSamples {
  */
 class NightCompressor {
     private var effect: DynamicsProcessing? = null
+    private var session = 0
 
+    /**
+     * Follows the player's audio session. The effect exists only while night mode is on: nothing is attached to the
+     * session otherwise (on some phones an effect on the session, even switched off, changes how the system mixes it).
+     */
     fun attach(audioSessionId: Int, enabled: Boolean) {
         release()
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P || audioSessionId == C.AUDIO_SESSION_ID_UNSET || audioSessionId == 0) return
-        effect = runCatching {
+        session = audioSessionId
+        setEnabled(enabled)
+    }
+
+    fun setEnabled(enabled: Boolean) {
+        if (!enabled) {
+            release()
+            return
+        }
+        if (effect == null) effect = create(session)
+        runCatching { effect?.setEnabled(true) }
+    }
+
+    fun release() {
+        runCatching { effect?.release() }
+        effect = null
+    }
+
+    private fun create(audioSessionId: Int): DynamicsProcessing? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P || audioSessionId == C.AUDIO_SESSION_ID_UNSET || audioSessionId == 0) return null
+        return runCatching {
             val config = DynamicsProcessing.Config.Builder(
                 DynamicsProcessing.VARIANT_FAVOR_FREQUENCY_RESOLUTION, 1,
                 false, 0, true, 1, false, 0, true,
@@ -325,16 +350,6 @@ class NightCompressor {
             config.setLimiterAllChannelsTo(DynamicsProcessing.Limiter(true, true, 0, 1f, 60f, 10f, PEAK_DB, 0f))
             DynamicsProcessing(0, audioSessionId, config)
         }.getOrNull()
-        setEnabled(enabled)
-    }
-
-    fun setEnabled(enabled: Boolean) {
-        runCatching { effect?.setEnabled(enabled) }
-    }
-
-    fun release() {
-        runCatching { effect?.release() }
-        effect = null
     }
 
     private companion object {

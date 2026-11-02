@@ -229,6 +229,8 @@ class PlayerEngine(context: Context) {
         override fun onAudioInputFormatChanged(eventTime: AnalyticsListener.EventTime, format: Format, decoderReuseEvaluation: DecoderReuseEvaluation?) {
             audioFlow.value = audioSignalFor(format)
             replayGain.db = ReplayGain.gainDb(format.metadata) ?: 0f
+            // A negative gain lowers through the volume; the sink only boosts.
+            player.volume = if (settings.volumeLeveling.value && replayGain.db < 0f) ReplayGain.factor(replayGain.db) else 1f
         }
 
         override fun onAudioTrackInitialized(eventTime: AnalyticsListener.EventTime, audioTrackConfig: AudioSink.AudioTrackConfig) {

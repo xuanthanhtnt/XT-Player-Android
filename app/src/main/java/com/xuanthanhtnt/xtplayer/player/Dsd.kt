@@ -20,9 +20,10 @@ import kotlin.math.sin
 
 /**
  * DSD (DSF and DSDIFF files) for a player without an FFmpeg demuxer. The Apple app hands DSD to FFmpeg, which turns
- * it into PCM at 1/8 of the DSD rate (DSD64 → 352.8 kHz). Here the 1-bit stream is filtered and decimated to
- * 176.4 kHz (192 kHz for 48 kHz-family DSD), the highest rate every Android audio output accepts. The DSD rate is
- * kept in the format's `codecs` ("dsd:2822400") so the signal path still says DSD64.
+ * it into PCM at 1/8 of the DSD rate (DSD64 → 352.8 kHz) and resamples with its own long filter. Android's mixer
+ * resamples with a much shorter one, which lets DSD's loud ultrasonic noise fold back into the audible band as a
+ * hiss or crackle; so here the 1-bit stream is filtered to 24 kHz and decimated to 88.2 kHz (96 kHz for 48 kHz-family
+ * DSD). The DSD rate is kept in the format's `codecs` ("dsd:2822400") so the signal path still says DSD64.
  */
 object DsdFormat {
     private const val PREFIX = "dsd:"
@@ -32,25 +33,30 @@ object DsdFormat {
     /** The DSD rate of a format made by [DsfExtractor] / [DffExtractor], else null. */
     fun dsdRate(format: Format): Int? = format.codecs?.takeIf { it.startsWith(PREFIX) }?.removePrefix(PREFIX)?.toIntOrNull()
 
-    /** Decimation from the DSD rate to the PCM rate: a power of two, ≥ 16, leaving at most 192 kHz. */
+    /** Decimation from the DSD rate to the PCM rate: a power of two, ≥ 32, leaving at most 96 kHz. */
     fun decimation(dsdRate: Int): Int {
-        var factor = 16
-        while (dsdRate / factor > 192_000) factor *= 2
+        var factor = 32
+        while (dsdRate / factor > 96_000) factor *= 2
         return factor
     }
+
+    /** Where the PCM is cut off: above it DSD carries its shaped noise, not music. */
+    const val PASS_BAND_HZ = 24_000.0
 }
 
 /**
  * 1-bit DSD to float PCM for one channel. Stage 1: a 128-tap low-pass applied a byte (8 DSD samples) at a time
- * through lookup tables, one output per byte (÷8). Stage 2: a windowed-sinc low-pass decimating the rest of the
- * way (÷2 for DSD64). Bytes are taken oldest bit first (DSF order); DSDIFF bytes are bit-reversed before.
+ * through lookup tables, one output per byte (÷8). Stage 2: a windowed-sinc low-pass at 24 kHz decimating the rest
+ * of the way (÷4 for DSD64). Histories are kept twice over, so the inner loops read straight runs without wrapping.
+ * Bytes are taken oldest bit first (DSF order); DSDIFF bytes are bit-reversed before.
  */
 class DsdDecimator(dsdRate: Int) {
     private val stage2 = DsdFormat.decimation(dsdRate) / 8
-    private val history = ByteArray(TABLE_BYTES)
+    private val history = ByteArray(2 * TABLE_BYTES)
     private var head = 0
-    private val taps2 = filter2(stage2)
-    private val ring = FloatArray(taps2.size)
+    private val taps2 = filter2(dsdRate / 8, stage2)
+    private val length = taps2.size
+    private val ring = FloatArray(2 * length)
     private var ringHead = 0
     private var phase = 0
 
@@ -70,19 +76,24 @@ class DsdDecimator(dsdRate: Int) {
     fun process(input: ByteArray, offset: Int, count: Int, inputStep: Int, output: FloatArray, outputOffset: Int, outputStep: Int): Int {
         var written = 0
         var at = offset
+        val tables = tables
         for (i in 0 until count) {
-            head = (head + TABLE_BYTES - 1) % TABLE_BYTES
-            history[head] = input[at]
+            head = if (head == 0) TABLE_BYTES - 1 else head - 1
+            val b = input[at]
+            history[head] = b
+            history[head + TABLE_BYTES] = b
             at += inputStep
             var sample = 0.0
-            for (j in 0 until TABLE_BYTES) sample += tables[j][history[(head + j) % TABLE_BYTES].toInt() and 0xFF]
-            ringHead = (ringHead + ring.size - 1) % ring.size
-            ring[ringHead] = sample.toFloat()
-            phase++
-            if (phase == stage2) {
+            for (j in 0 until TABLE_BYTES) sample += tables[(j shl 8) or (history[head + j].toInt() and 0xFF)]
+            ringHead = if (ringHead == 0) length - 1 else ringHead - 1
+            val s = sample.toFloat()
+            ring[ringHead] = s
+            ring[ringHead + length] = s
+            if (++phase == stage2) {
                 phase = 0
                 var acc = 0f
-                for (k in taps2.indices) acc += taps2[k] * ring[(ringHead + k) % ring.size]
+                val base = ringHead
+                for (k in 0 until length) acc += taps2[k] * ring[base + k]
                 output[outputOffset + written * outputStep] = acc
                 written++
             }
@@ -95,27 +106,28 @@ class DsdDecimator(dsdRate: Int) {
         /** 0x69 = 01101001: equal ones and zeros, DSD's idle pattern. */
         private const val SILENCE: Byte = 0x69
 
-        /** table[j][b]: the contribution of byte b at age j (byte 0 the newest) to stage 1's output. */
-        private val tables: Array<DoubleArray> = run {
+        /** [j * 256 + b]: the contribution of byte b at age j (byte 0 the newest) to stage 1's output. */
+        private val tables: DoubleArray = run {
             val taps = TABLE_BYTES * 8
             // Cut-off 0.45 of stage 1's output Nyquist (the byte rate), Blackman window, unity gain at DC.
             val h = lowPass(taps, 0.45 / 16.0)
-            Array(TABLE_BYTES) { j ->
-                DoubleArray(256) { b ->
-                    var acc = 0.0
-                    for (k in 0 until 8) {
-                        // Bit k is the k-th oldest of the byte: age 8j + (7 − k).
-                        val sign = if ((b shr k) and 1 == 1) 1.0 else -1.0
-                        acc += h[8 * j + (7 - k)] * sign
-                    }
-                    acc
+            DoubleArray(TABLE_BYTES * 256) { index ->
+                val j = index shr 8
+                val b = index and 0xFF
+                var acc = 0.0
+                for (k in 0 until 8) {
+                    // Bit k is the k-th oldest of the byte: age 8j + (7 − k).
+                    val sign = if ((b shr k) and 1 == 1) 1.0 else -1.0
+                    acc += h[8 * j + (7 - k)] * sign
                 }
+                acc
             }
         }
 
-        private fun filter2(factor: Int): FloatArray {
+        /** Stage 2 at [rate] (the byte rate): 24 kHz pass band, 48 taps per step of decimation. */
+        private fun filter2(rate: Int, factor: Int): FloatArray {
             val taps = 48 * factor
-            return lowPass(taps, 0.45 / factor / 2.0).map { it.toFloat() }.toFloatArray()
+            return lowPass(taps, DsdFormat.PASS_BAND_HZ / rate).map { it.toFloat() }.toFloatArray()
         }
 
         /** Windowed-sinc low-pass, [cutoff] in cycles per sample, Blackman window, taps summing to 1. */
