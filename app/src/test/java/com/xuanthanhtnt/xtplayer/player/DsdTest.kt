@@ -9,12 +9,12 @@ import kotlin.math.abs
 class DsdTest {
     @Test
     fun pcmRates() {
-        // DSD64 / DSD128 / DSD256 / DSD512 (44.1 kHz family) → 176.4 kHz; 48 kHz family → 192 kHz.
-        assertEquals(16, DsdFormat.decimation(2_822_400))
-        assertEquals(32, DsdFormat.decimation(5_644_800))
-        assertEquals(64, DsdFormat.decimation(11_289_600))
-        assertEquals(128, DsdFormat.decimation(22_579_200))
-        assertEquals(192_000, 3_072_000 / DsdFormat.decimation(3_072_000))
+        // DSD64 / DSD128 / DSD256 / DSD512 (44.1 kHz family) → 88.2 kHz; 48 kHz family → 96 kHz.
+        assertEquals(32, DsdFormat.decimation(2_822_400))
+        assertEquals(64, DsdFormat.decimation(5_644_800))
+        assertEquals(128, DsdFormat.decimation(11_289_600))
+        assertEquals(256, DsdFormat.decimation(22_579_200))
+        assertEquals(96_000, 3_072_000 / DsdFormat.decimation(3_072_000))
     }
 
     @Test
@@ -31,7 +31,8 @@ class DsdTest {
         val input = ByteArray(4096) { byte }
         val output = FloatArray(4096)
         val n = decimator.process(input, 0, input.size, 1, output, 0, 1)
-        assertEquals(input.size / 2, n)
+        // DSD64: one PCM sample per 4 bytes (32 DSD samples).
+        assertEquals(input.size / 4, n)
         return output[n - 1].toDouble()
     }
 
@@ -77,6 +78,17 @@ class DsdTest {
         // DST (compressed DSD) is recognised but not played.
         val dst = file.copyOf().also { "DST ".forEachIndexed { i, c -> it[file.size - 12 + i] = c.code.toByte() } }
         assertEquals(true, DsdHeader.parseDff(dst)!!.compressed)
+    }
+
+    @Test
+    fun ultrasonicNoiseIsFilteredOut() {
+        // A 1-bit square wave at 44.1 kHz (32 ones, 32 zeros): far above the 24 kHz pass band.
+        val decimator = DsdDecimator(2_822_400)
+        val input = ByteArray(8192) { i -> if ((i / 4) % 2 == 0) 0xFF.toByte() else 0x00 }
+        val output = FloatArray(4096)
+        val n = decimator.process(input, 0, input.size, 1, output, 0, 1)
+        val tail = output.copyOfRange(n / 2, n)
+        assertTrue(tail.maxOf { abs(it) } < 0.01f)
     }
 
     @Test

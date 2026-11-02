@@ -103,6 +103,7 @@ fun SettingsScreen() {
                 PrefSwitch("Khớp tần số lấy mẫu với DAC USB", settings.matchSampleRate)
             }
             PrefSwitch("Bitstream TrueHD / DTS-HD / E-AC3 qua HDMI", settings.audioPassthrough)
+            AudioLogButton()
             PrefText("Ngôn ngữ âm thanh ưu tiên (vd: vie,eng)", settings.audioLanguages)
         }
 
@@ -202,6 +203,20 @@ private fun <T> ChoiceRow(label: String, pref: Pref<T>, options: List<Pair<T, St
             if (detail != null) Text(detail, style = MaterialTheme.typography.bodySmall, color = XtColors.secondaryText)
         }
         Text(options.getOrNull(currentIndex)?.second ?: "$value", color = XtColors.lime, style = MaterialTheme.typography.bodyLarge)
+    }
+}
+
+/** The music player's output log ([audio] lines): formats, output, underruns. Sent along when sound crackles. */
+@Composable
+private fun AudioLogButton() {
+    var show by remember { mutableStateOf(false) }
+    OutlinedButton(onClick = { show = true }, modifier = Modifier.padding(vertical = 6.dp)) { Text("Nhật ký âm thanh") }
+    if (show) {
+        val lines = com.xuanthanhtnt.xtplayer.core.AppLog.snapshot().filter { it.contains("[audio]") }
+        com.xuanthanhtnt.xtplayer.ui.CrashReportDialog(
+            lines.joinToString("\n").ifEmpty { "Chưa có dòng nào. Phát một bài nhạc rồi mở lại." },
+            title = "Nhật ký âm thanh",
+        ) { show = false }
     }
 }
 
