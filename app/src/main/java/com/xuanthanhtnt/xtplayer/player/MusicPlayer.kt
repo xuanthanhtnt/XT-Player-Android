@@ -287,7 +287,7 @@ object MusicPlayer {
     private fun makePlayer(): ExoPlayer {
         player?.let { return it }
         val context = AppGraph.context
-        val exo = ExoPlayer.Builder(context, XtRenderersFactory(context, passthrough = false, gain = replayGain))
+        val exo = ExoPlayer.Builder(context, XtRenderersFactory(context, passthrough = false, gain = replayGain, preferSoftwareAudio = true))
             .setMediaSourceFactory(
                 DefaultMediaSourceFactory(XtDataSource.Factory(context), XtExtractorsFactory)
                     .setLoadErrorHandlingPolicy(DefaultLoadErrorHandlingPolicy(8))
@@ -394,6 +394,12 @@ object MusicPlayer {
                     "channels 0x${Integer.toHexString(audioTrackConfig.channelConfig)}, buffer ${audioTrackConfig.bufferSize} B",
             )
             updateSignal()
+        }
+
+        override fun onAudioDecoderInitialized(
+            eventTime: AnalyticsListener.EventTime, decoderName: String, initializedTimestampMs: Long, initializationDurationMs: Long,
+        ) {
+            log("decoder $decoderName")
         }
 
         // Diagnostics for crackles: the output ran dry, or the sink failed.

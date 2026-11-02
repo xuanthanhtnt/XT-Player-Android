@@ -198,6 +198,9 @@ internal class XtAudioSink(sink: AudioSink, private val context: Context, privat
         channels = inputFormat.channelCount
         sampleRate = inputFormat.sampleRate
         this.outputChannels = AudioOutputs.outputChannels(context, channels)
+        com.xuanthanhtnt.xtplayer.core.AppLog.append(
+            "[audio] sink input ${inputFormat.sampleMimeType} pcm ${inputFormat.pcmEncoding}, $sampleRate Hz, $channels ch",
+        )
         // Before the output opens: a USB DAC can be asked for the file's rate.
         if (encoding != C.ENCODING_INVALID) HiResOutput.follow(context, sampleRate, channels, HiResOutput.isHighResolution(encoding))
         enhancer.reset()

@@ -116,12 +116,19 @@ internal class XtRenderersFactory(
     context: Context,
     private val passthrough: Boolean,
     private val gain: GainHolder = GainHolder(),
+    /**
+     * Music: FFmpeg's decoders first, as in the Apple app. Some phones' FLAC decoders report float output when Media3
+     * asks for it but still write 16-bit samples, which plays as loud crackle (Galaxy Tab S10).
+     */
+    preferSoftwareAudio: Boolean = false,
 ) : DefaultRenderersFactory(context) {
     private val appContext = context.applicationContext
 
     init {
-        // Platform decoders first; FFmpeg (TrueHD, DTS, …) when the device has none.
-        setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
+        // Video: platform decoders first; FFmpeg (TrueHD, DTS, …) when the device has none. Music: FFmpeg first.
+        setExtensionRendererMode(
+            if (preferSoftwareAudio) DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER else DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
+        )
         setEnableDecoderFallback(true)
         // 24-bit / high-sample-rate PCM (FLAC, decoded TrueHD / DTS-HD MA) stays in float instead of being cut to 16 bit.
         setEnableAudioFloatOutput(true)
