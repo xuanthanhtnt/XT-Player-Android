@@ -402,6 +402,10 @@ fun AlbumDetailScreen(itemKey: String) {
 private fun AlbumHeader(album: LibraryItem, tracks: List<LibraryFile>, entryByKey: Map<String, MediaEntry>, actions: AppActions) {
     val isTv = LocalIsTv.current
     var more by remember { mutableStateOf(false) }
+    val queue by MusicPlayer.queue.collectAsState()
+    val playingIndex by MusicPlayer.index.collectAsState()
+    val playingKey = queue.getOrNull(playingIndex)?.item?.key
+    val albumPlaying = playingKey != null && tracks.any { it.key == playingKey }
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val cover = if (isTv) 240.dp else 200.dp
         // Side by side as on the Mac and iPad; stacked on a narrow phone.
@@ -416,7 +420,12 @@ private fun AlbumHeader(album: LibraryItem, tracks: List<LibraryFile>, entryByKe
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.padding(top = 6.dp),
                 ) {
-                    HeroButton("Phát", Icons.Filled.PlayArrow, primary = true) { playAlbum(album, tracks, 0, actions) }
+                    // While this album plays the button says so and opens Now Playing instead of starting over.
+                    if (albumPlaying) {
+                        HeroButton("Đang phát", Icons.Filled.GraphicEq, primary = true) { MusicPlayer.setShowsNowPlaying(true) }
+                    } else {
+                        HeroButton("Phát", Icons.Filled.PlayArrow, primary = true) { playAlbum(album, tracks, 0, actions) }
+                    }
                     HeroButton("Trộn bài", Icons.Filled.Shuffle, primary = false) { playAlbum(album, tracks, 0, actions, shuffle = true) }
                     Box(
                         Modifier

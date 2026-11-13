@@ -48,7 +48,6 @@ class PlayerActivity : ComponentActivity() {
         MusicPlayer.suspendForVideo()
         isTv = (getSystemService(UI_MODE_SERVICE) as UiModeManager).currentModeType == Configuration.UI_MODE_TYPE_TELEVISION ||
             packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         addOnPictureInPictureModeChangedListener { info ->
             inPip.value = info.isInPictureInPictureMode
             // Leaving PiP while stopped means the window was closed (✕ or swiped away), not expanded: stop playing.
@@ -130,7 +129,7 @@ class PlayerActivity : ComponentActivity() {
 
     private fun start(session: PlaybackSession) {
         val engine = PlayerEngine(this).also { engine = it }
-        mediaSession = runCatching { MediaSession.Builder(this, engine.player).setId("xtplayer-${System.nanoTime()}").build() }.getOrNull()
+        mediaSession = runCatching { MediaSession.Builder(this, engine.player).setId("xtplayer-${System.nanoTime()}").setPeriodicPositionUpdateEnabled(false).build() }.getOrNull()
         val controller = PlayerController(engine, session, lifecycleScope, ::matchContent).also { controller = it }
         setContent {
             XtTheme(isTv = isTv, isWide = true) {
