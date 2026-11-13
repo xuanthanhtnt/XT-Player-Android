@@ -79,7 +79,7 @@ import com.xuanthanhtnt.xtplayer.ui.LocalAppActions
 import com.xuanthanhtnt.xtplayer.ui.PageTitle
 import com.xuanthanhtnt.xtplayer.ui.focusClickable
 import com.xuanthanhtnt.xtplayer.ui.home.HeroButton
-import com.xuanthanhtnt.xtplayer.ui.music.NowPlayingButton
+import com.xuanthanhtnt.xtplayer.ui.music.NowPlayingShortcut
 import com.xuanthanhtnt.xtplayer.ui.music.QueueActionsDialog
 import com.xuanthanhtnt.xtplayer.ui.theme.LocalDimens
 import com.xuanthanhtnt.xtplayer.ui.theme.LocalIsTv
@@ -178,7 +178,6 @@ fun AlbumsScreen(embedded: Boolean = false) {
         item(span = { GridItemSpan(maxLineSpan) }) {
             Column {
                 if (!embedded) PageTitle("Nhạc", inset = false)
-                if (LocalIsTv.current) Box(Modifier.padding(bottom = 12.dp)) { NowPlayingButton() }
                 if (albums.isEmpty()) {
                     MusicEmptyHint(LibraryFolderKind.MUSIC)
                 } else {
@@ -202,6 +201,8 @@ fun MusicLibraryScreen(includeVideos: Boolean = true) {
         PageTitle("Nhạc")
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(horizontal = dimens.pagePadding).padding(bottom = 12.dp)) {
             pages.forEachIndexed { i, label -> SortChip(label, page == i) { page = i } }
+            // TV has no music bar: the way back to Now Playing sits beside the page picker.
+            if (LocalIsTv.current) NowPlayingShortcut(compact = true)
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when (page) {
@@ -407,7 +408,6 @@ private fun AlbumHeader(album: LibraryItem, tracks: List<LibraryFile>, entryByKe
     val playingIndex by MusicPlayer.index.collectAsState()
     val playingKey = queue.getOrNull(playingIndex)?.item?.key
     val albumPlaying = playingKey != null && tracks.any { it.key == playingKey }
-    val paused by MusicPlayer.isPaused.collectAsState()
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val cover = if (isTv) 240.dp else 200.dp
         // Side by side as on the Mac and iPad; stacked on a narrow phone.
@@ -422,12 +422,10 @@ private fun AlbumHeader(album: LibraryItem, tracks: List<LibraryFile>, entryByKe
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.padding(top = 6.dp),
                 ) {
-                    // While this album plays the button says so and opens Now Playing instead of starting over;
-                    // paused, it resumes where it stopped.
-                    if (albumPlaying && paused) {
-                        HeroButton("Phát tiếp", Icons.Filled.PlayArrow, primary = true) { MusicPlayer.togglePause() }
-                    } else if (albumPlaying) {
-                        HeroButton("Đang phát", Icons.Filled.GraphicEq, primary = true) { MusicPlayer.setShowsNowPlaying(true) }
+                    // While this album is in the player the button follows it ("Đang phát" / "Tiếp tục" / "Phát lại")
+                    // instead of starting over.
+                    if (albumPlaying) {
+                        NowPlayingShortcut()
                     } else {
                         HeroButton("Phát", Icons.Filled.PlayArrow, primary = true) { playAlbum(album, tracks, 0, actions) }
                     }
