@@ -782,21 +782,46 @@ private fun PathStep(title: String, value: String) {
     }
 }
 
-/** tvOS "Đang phát": back to Now Playing from the music page while music plays (TV has no bar). */
+/**
+ * NowPlayingShortcut (MusicViews.swift): follows the player's own state, not only the track, for the album page and
+ * the TV music page. Playing (or opening a track): "Đang phát", opens Now Playing. Paused: "Tiếp tục", resumes (on
+ * TV also opens Now Playing, as "Phát" does). Played to the end: "Phát lại", from the first track. Nothing when the
+ * queue is empty. [compact]: a pill (the TV music page) instead of the album page's large button.
+ */
 @Composable
-fun NowPlayingButton() {
+fun NowPlayingShortcut(compact: Boolean = false) {
     val queue by MusicPlayer.queue.collectAsState()
+    val paused by MusicPlayer.isPaused.collectAsState()
+    val ended by MusicPlayer.isEnded.collectAsState()
+    val isTv = LocalIsTv.current
     if (queue.isEmpty()) return
+    val label = when {
+        ended -> "Phát lại"
+        paused -> "Tiếp tục"
+        else -> "Đang phát"
+    }
+    val icon = if (ended || paused) Icons.Filled.PlayArrow else Icons.Filled.GraphicEq
+    val onClick: () -> Unit = {
+        when {
+            ended -> MusicPlayer.jump(0)
+            paused -> MusicPlayer.togglePause()
+        }
+        if (isTv || (!ended && !paused)) MusicPlayer.setShowsNowPlaying(true)
+    }
+    if (!compact) {
+        com.xuanthanhtnt.xtplayer.ui.home.HeroButton(label, icon, primary = true, onClick = onClick)
+        return
+    }
     Row(
         Modifier
-            .focusClickable(CircleShape, focusScale = 1.05f) { MusicPlayer.setShowsNowPlaying(true) }
+            .focusClickable(CircleShape, focusScale = 1.05f, onClick = onClick)
             .background(XtColors.glass, CircleShape)
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Icon(Icons.Filled.GraphicEq, null, tint = XtColors.leaf, modifier = Modifier.size(18.dp))
-        Text("Đang phát", style = MaterialTheme.typography.labelLarge, color = Color.White)
+        Icon(icon, null, tint = XtColors.leaf, modifier = Modifier.size(18.dp))
+        Text(label, style = MaterialTheme.typography.labelLarge, color = Color.White, maxLines = 1)
     }
 }
 

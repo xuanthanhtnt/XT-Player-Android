@@ -65,6 +65,7 @@ object MusicPlayer {
     private val nowPlayingFlow = MutableStateFlow(false)
     private val playingFlow = MutableStateFlow(false)
     private val pausedFlow = MutableStateFlow(false)
+    private val endedFlow = MutableStateFlow(false)
     private val positionFlow = MutableStateFlow(0.0)
     private val durationFlow = MutableStateFlow(0.0)
     private val signalFlow = MutableStateFlow(AudioPathInput())
@@ -75,8 +76,10 @@ object MusicPlayer {
     val repeatMode: StateFlow<RepeatMode> = repeatFlow
     val showsNowPlaying: StateFlow<Boolean> = nowPlayingFlow
     val isPlaying: StateFlow<Boolean> = playingFlow
-    /** Paused by the listener (or played to the end), as opposed to loading between tracks while meant to play. */
+    /** Paused by the listener, as opposed to loading between tracks while meant to play. */
     val isPaused: StateFlow<Boolean> = pausedFlow
+    /** The queue was played to its end. */
+    val isEnded: StateFlow<Boolean> = endedFlow
     val position: StateFlow<Double> = positionFlow
     val duration: StateFlow<Double> = durationFlow
     val signal: StateFlow<AudioPathInput> = signalFlow
@@ -283,6 +286,7 @@ object MusicPlayer {
         nowPlayingFlow.value = false
         playingFlow.value = false
         pausedFlow.value = false
+        endedFlow.value = false
         formats.clear()
         entryKey = null
     }
@@ -425,7 +429,9 @@ object MusicPlayer {
 
     private fun updatePaused() {
         val exo = player
-        pausedFlow.value = exo != null && (!exo.playWhenReady || exo.playbackState == Player.STATE_ENDED)
+        val ended = exo != null && exo.playbackState == Player.STATE_ENDED
+        endedFlow.value = ended
+        pausedFlow.value = exo != null && !exo.playWhenReady && !ended
     }
 
     private fun log(message: String) = com.xuanthanhtnt.xtplayer.core.AppLog.append("[audio] $message")

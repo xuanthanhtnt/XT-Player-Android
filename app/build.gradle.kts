@@ -35,8 +35,8 @@ android {
         applicationId = "com.xuanthanhtnt.xtplayer"
         minSdk = 26
         targetSdk = 35
-        versionCode = 15
-        versionName = "0.3.1"
+        versionCode = 16
+        versionName = "0.3.2"
 
         buildConfigField("String", "TMDB_API_KEY", "\"${buildKey("TMDB_API_KEY")}\"")
         buildConfigField("String", "OPENSUBTITLES_API_KEY", "\"${buildKey("OPENSUBTITLES_API_KEY")}\"")
