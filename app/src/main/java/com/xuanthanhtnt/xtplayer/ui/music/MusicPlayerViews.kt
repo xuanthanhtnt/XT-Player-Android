@@ -1,6 +1,36 @@
 package com.xuanthanhtnt.xtplayer.ui.music
 
 import androidx.compose.foundation.background
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -225,6 +255,10 @@ fun NowPlayingOverlay() {
 @Composable
 private fun NowPlayingContent(item: PlaybackItem) {
     val isTv = LocalIsTv.current
+    if (isTv) {
+        TvNowPlaying(item)
+        return
+    }
     val density = LocalDensity.current
     var showsQueue by remember { mutableStateOf(false) }
     var showsOptions by remember { mutableStateOf(false) }
@@ -360,6 +394,236 @@ private fun Transport(playFocus: FocusRequester) {
             17.dp,
             tint = if (repeat == MusicPlayer.RepeatMode.OFF) dim else XtColors.leaf,
         ) { MusicPlayer.cycleRepeat() }
+    }
+}
+
+// TV Now Playing (MusicPlayerViews.swift `TVNowPlaying`, Apple v0.3.4)
+
+/**
+ * The large cover on a slowly drifting blur of itself, "ĐANG PHÁT · BÀI n/N", the title, quality, a thick progress
+ * line, round glass buttons that grow under the focus; track changes cross-fade, the queue slides in from the right.
+ * Back closes the queue first, then Now Playing.
+ */
+@Composable
+private fun TvNowPlaying(item: PlaybackItem) {
+    val playing by MusicPlayer.isPlaying.collectAsState()
+    val queue by MusicPlayer.queue.collectAsState()
+    val index by MusicPlayer.index.collectAsState()
+    val shuffled by MusicPlayer.isShuffled.collectAsState()
+    val repeat by MusicPlayer.repeatMode.collectAsState()
+    var showsQueue by remember { mutableStateOf(false) }
+    var showsOptions by remember { mutableStateOf(false) }
+    val playFocus = remember { FocusRequester() }
+    val queueButton = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        delay(60)
+        runCatching { playFocus.requestFocus() }
+    }
+    BackHandler(enabled = showsQueue) {
+        showsQueue = false
+        runCatching { queueButton.requestFocus() }
+    }
+    val drift = rememberInfiniteTransition(label = "drift")
+    val driftScale by drift.animateFloat(1.2f, 1.5f, infiniteRepeatable(tween(28_000, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "driftScale")
+    val driftTurn by drift.animateFloat(-6f, 6f, infiniteRepeatable(tween(28_000, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "driftTurn")
+    val coverSide by animateDpAsState(if (showsQueue) 190.dp else 280.dp, spring(dampingRatio = 0.86f, stiffness = Spring.StiffnessLow), label = "cover")
+    // Breathes with playback, as in Music: full size while playing, set back when paused.
+    val coverScale by animateFloatAsState(if (playing) 1f else 0.9f, spring(dampingRatio = 0.72f, stiffness = Spring.StiffnessLow), label = "breath")
+
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(XtColors.background)
+            .onPreviewKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown && event.nativeKeyEvent.keyCode == android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE) {
+                    MusicPlayer.togglePause()
+                    true
+                } else {
+                    false
+                }
+            }
+    ) {
+        // A small copy of the cover, stretched and blurred, drifting and turning slowly: the screen never sits still.
+        Crossfade(targetState = item.artworkPath, animationSpec = tween(600), label = "backdrop") { path ->
+            ArtworkImage(
+                path,
+                Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        scaleX = driftScale
+                        scaleY = driftScale
+                        rotationZ = driftTurn
+                    }
+                    .blur(20.dp),
+                size = "w92",
+                placeholderIcon = Icons.Filled.MusicNote,
+            )
+        }
+        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.15f), Color.Black.copy(alpha = 0.45f), Color.Black.copy(alpha = 0.8f)))))
+        Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(listOf(Color.Black.copy(alpha = 0.35f), Color.Transparent))))
+        Row(
+            Modifier
+                .fillMaxSize()
+                .padding(horizontal = if (showsQueue) 45.dp else 65.dp, vertical = 45.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(if (showsQueue) 27.dp else 48.dp),
+        ) {
+            Crossfade(targetState = item, animationSpec = tween(600), label = "cover") { shown ->
+                ArtworkImage(
+                    shown.artworkPath,
+                    Modifier
+                        .size(coverSide)
+                        .graphicsLayer {
+                            scaleX = coverScale
+                            scaleY = coverScale
+                        }
+                        .shadow(30.dp, RoundedCornerShape(15.dp))
+                        .clip(RoundedCornerShape(15.dp)),
+                    size = "w780",
+                    placeholderIcon = Icons.Filled.MusicNote,
+                )
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(13.dp)) {
+                Text(
+                    if (queue.size > 1) "ĐANG PHÁT · BÀI ${index + 1}/${queue.size}" else "ĐANG PHÁT",
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Black, letterSpacing = 3.sp),
+                    color = XtColors.leaf,
+                )
+                Crossfade(targetState = item, animationSpec = tween(600), label = "title") { shown ->
+                    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                        Text(
+                            shown.title,
+                            fontSize = if (showsQueue) 20.sp else 26.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        shown.subtitle?.let {
+                            Text(it, style = MaterialTheme.typography.titleMedium, color = Color.White.copy(alpha = 0.7f), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                }
+                SignalPathBadge()
+                TvProgress(Modifier.padding(top = 4.dp))
+                Row(Modifier.padding(top = 3.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(17.dp)) {
+                    TvRoundButton(Icons.Filled.SkipPrevious, "Bài trước", 40.dp) { MusicPlayer.previous() }
+                    TvRoundButton(
+                        if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                        if (playing) "Tạm dừng" else "Phát",
+                        52.dp,
+                        prominent = true,
+                        modifier = Modifier.focusRequester(playFocus),
+                    ) { MusicPlayer.togglePause() }
+                    TvRoundButton(Icons.Filled.SkipNext, "Bài tiếp", 40.dp) { MusicPlayer.next() }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(11.dp)) {
+                    TvRoundButton(Icons.Filled.Shuffle, "Trộn bài", 30.dp, active = shuffled) { MusicPlayer.toggleShuffle() }
+                    TvRoundButton(
+                        if (repeat == MusicPlayer.RepeatMode.ONE) Icons.Filled.RepeatOne else Icons.Filled.Repeat,
+                        "Lặp lại",
+                        30.dp,
+                        active = repeat != MusicPlayer.RepeatMode.OFF,
+                    ) { MusicPlayer.cycleRepeat() }
+                    TvRoundButton(Icons.AutoMirrored.Filled.QueueMusic, "Hàng đợi", 30.dp, active = showsQueue, modifier = Modifier.focusRequester(queueButton)) {
+                        showsQueue = !showsQueue
+                    }
+                    TvRoundButton(Icons.Filled.Tune, "Xử lý âm thanh", 30.dp) { showsOptions = true }
+                }
+            }
+            AnimatedVisibility(
+                visible = showsQueue,
+                enter = slideInHorizontally { it } + fadeIn(),
+                exit = slideOutHorizontally { it } + fadeOut(),
+            ) {
+                QueueList(
+                    Modifier
+                        .width(300.dp)
+                        .fillMaxHeight(0.82f)
+                        .clip(RoundedCornerShape(17.dp))
+                        .background(Color.Black.copy(alpha = 0.35f))
+                        .padding(14.dp)
+                )
+            }
+        }
+    }
+    if (showsOptions) AudioOptionsDialog { showsOptions = false }
+}
+
+/** Thick progress line with the times under it. */
+@Composable
+private fun TvProgress(modifier: Modifier = Modifier) {
+    val position by MusicPlayer.position.collectAsState()
+    val duration by MusicPlayer.duration.collectAsState()
+    val fraction = if (duration > 0) (position / duration).toFloat().coerceIn(0f, 1f) else 0f
+    val shown by animateFloatAsState(fraction, tween(500, easing = LinearEasing), label = "progress")
+    Column(modifier.widthIn(max = 360.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(6.dp)
+                .clip(CircleShape)
+                .background(Color.White.copy(alpha = 0.18f))
+        ) {
+            Box(
+                Modifier
+                    .fillMaxWidth(shown)
+                    .height(6.dp)
+                    .clip(CircleShape)
+                    .background(Brush.horizontalGradient(listOf(XtColors.leaf, XtColors.leaf.copy(alpha = 0.75f))))
+            )
+        }
+        Row(Modifier.fillMaxWidth()) {
+            Text(TimeFormat.clock(position), style = MaterialTheme.typography.labelLarge.copy(fontFamily = FontFamily.Monospace), color = Color.White.copy(alpha = 0.65f), modifier = Modifier.weight(1f))
+            Text("-" + TimeFormat.clock(maxOf(0.0, duration - position)), style = MaterialTheme.typography.labelLarge.copy(fontFamily = FontFamily.Monospace), color = Color.White.copy(alpha = 0.65f))
+        }
+    }
+}
+
+/** Round glass button: grows to 1.16 and turns white under the focus, like the system's own. */
+@Composable
+private fun TvRoundButton(
+    icon: ImageVector,
+    label: String,
+    size: Dp,
+    prominent: Boolean = false,
+    active: Boolean = false,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    val interaction = remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
+    val scale by animateFloatAsState(if (focused) 1.16f else 1f, spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessMediumLow), label = "roundScale")
+    Box(
+        modifier
+            .size(size)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .shadow(if (focused) 11.dp else 0.dp, CircleShape)
+            .clip(CircleShape)
+            .background(
+                when {
+                    focused -> Color.White
+                    prominent -> Color.White.copy(alpha = 0.22f)
+                    else -> Color.White.copy(alpha = 0.12f)
+                }
+            )
+            .border(1.dp, Color.White.copy(alpha = if (focused) 0f else 0.12f), CircleShape)
+            .clickable(interactionSource = interaction, indication = null, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            icon,
+            label,
+            tint = when {
+                focused -> Color.Black
+                active -> XtColors.leaf
+                else -> Color.White
+            },
+            modifier = Modifier.size(size * 0.42f),
+        )
     }
 }
 

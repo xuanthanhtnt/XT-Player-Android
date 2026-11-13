@@ -101,6 +101,7 @@ import com.xuanthanhtnt.xtplayer.ui.settings.SettingsScreen
 import com.xuanthanhtnt.xtplayer.ui.sources.AddServerScreen
 import com.xuanthanhtnt.xtplayer.ui.sources.BrowserScreen
 import com.xuanthanhtnt.xtplayer.ui.sources.SourcesScreen
+import com.xuanthanhtnt.xtplayer.ui.theme.LocalIsTv
 import com.xuanthanhtnt.xtplayer.ui.theme.XtColors
 import com.xuanthanhtnt.xtplayer.update.UpdateChecker
 import kotlinx.coroutines.CoroutineScope
@@ -226,7 +227,10 @@ fun XtApp(isTv: Boolean, wide: Boolean) {
 
     CompositionLocalProvider(LocalAppActions provides actions) {
         Box(Modifier.fillMaxSize()) {
-            if (wide || isTv) {
+            if (isTv) {
+                // A hidden menu instead of the sidebar; Apple TV has no music bar (Now Playing opens instead).
+                TvShell(nav)
+            } else if (wide) {
                 // The music bar runs under sidebar and content alike (as in Roon); the sidebar shrinks above it, so its
                 // Settings row stays visible. Apple TV has no bar: Now Playing opens instead.
                 Column(
@@ -326,7 +330,7 @@ private fun BackBar(modifier: Modifier = Modifier, onBack: () -> Unit) {
 }
 
 @Composable
-private fun AppNavHost(nav: NavHostController, sidebar: Boolean) {
+internal fun AppNavHost(nav: NavHostController, sidebar: Boolean) {
     NavHost(nav, startDestination = Section.HOME.route, modifier = Modifier.fillMaxSize()) {
         composable(Section.HOME.route) { HomeScreen() }
         composable(Section.SEARCH.route) { SearchScreen() }
@@ -338,7 +342,12 @@ private fun AppNavHost(nav: NavHostController, sidebar: Boolean) {
         composable(Section.GENRES.route) { GenresScreen() }
         // Phones get MusicLibraryView (albums or music videos); the sidebar lists the two apart.
         composable(Section.MUSIC.route) {
-            if (sidebar) com.xuanthanhtnt.xtplayer.ui.library.AlbumsScreen() else com.xuanthanhtnt.xtplayer.ui.library.MusicLibraryScreen()
+            when {
+                // TV lists music videos in its own menu entry.
+                LocalIsTv.current -> com.xuanthanhtnt.xtplayer.ui.library.MusicLibraryScreen(includeVideos = false)
+                sidebar -> com.xuanthanhtnt.xtplayer.ui.library.AlbumsScreen()
+                else -> com.xuanthanhtnt.xtplayer.ui.library.MusicLibraryScreen()
+            }
         }
         composable(Section.ARTISTS.route) { com.xuanthanhtnt.xtplayer.ui.library.ArtistsScreen() }
         composable("artist/{name}") { entry -> com.xuanthanhtnt.xtplayer.ui.library.ArtistDetailScreen(AppActions.decode(entry.arguments?.getString("name"))) }

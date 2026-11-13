@@ -194,13 +194,14 @@ fun AlbumsScreen(embedded: Boolean = false) {
 
 /** MusicLibraryView: the phone's "Nhạc" tab, albums, artists or music videos. */
 @Composable
-fun MusicLibraryScreen() {
+fun MusicLibraryScreen(includeVideos: Boolean = true) {
     var page by rememberSaveable { mutableStateOf(0) }
+    val pages = if (includeVideos) listOf("Album", "Nghệ sĩ", "Video ca nhạc") else listOf("Album", "Nghệ sĩ")
     val dimens = LocalDimens.current
     Column(Modifier.fillMaxSize()) {
         PageTitle("Nhạc")
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(horizontal = dimens.pagePadding).padding(bottom = 12.dp)) {
-            listOf("Album", "Nghệ sĩ", "Video ca nhạc").forEachIndexed { i, label -> SortChip(label, page == i) { page = i } }
+            pages.forEachIndexed { i, label -> SortChip(label, page == i) { page = i } }
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when (page) {
