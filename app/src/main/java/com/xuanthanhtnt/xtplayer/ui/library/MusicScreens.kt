@@ -407,6 +407,7 @@ private fun AlbumHeader(album: LibraryItem, tracks: List<LibraryFile>, entryByKe
     val playingIndex by MusicPlayer.index.collectAsState()
     val playingKey = queue.getOrNull(playingIndex)?.item?.key
     val albumPlaying = playingKey != null && tracks.any { it.key == playingKey }
+    val paused by MusicPlayer.isPaused.collectAsState()
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val cover = if (isTv) 240.dp else 200.dp
         // Side by side as on the Mac and iPad; stacked on a narrow phone.
@@ -421,8 +422,11 @@ private fun AlbumHeader(album: LibraryItem, tracks: List<LibraryFile>, entryByKe
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.padding(top = 6.dp),
                 ) {
-                    // While this album plays the button says so and opens Now Playing instead of starting over.
-                    if (albumPlaying) {
+                    // While this album plays the button says so and opens Now Playing instead of starting over;
+                    // paused, it resumes where it stopped.
+                    if (albumPlaying && paused) {
+                        HeroButton("Phát tiếp", Icons.Filled.PlayArrow, primary = true) { MusicPlayer.togglePause() }
+                    } else if (albumPlaying) {
                         HeroButton("Đang phát", Icons.Filled.GraphicEq, primary = true) { MusicPlayer.setShowsNowPlaying(true) }
                     } else {
                         HeroButton("Phát", Icons.Filled.PlayArrow, primary = true) { playAlbum(album, tracks, 0, actions) }
