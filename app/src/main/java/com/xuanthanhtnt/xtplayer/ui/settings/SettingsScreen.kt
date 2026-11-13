@@ -1,6 +1,23 @@
 package com.xuanthanhtnt.xtplayer.ui.settings
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ClosedCaption
+import androidx.compose.material.icons.filled.Dns
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.PlayCircleFilled
+import androidx.compose.material.icons.filled.Subtitles
+import androidx.compose.material.icons.filled.SystemUpdate
+import androidx.compose.material.icons.filled.Tv
+import androidx.compose.material.icons.filled.Verified
+import androidx.compose.material.icons.filled.VideoLibrary
+import androidx.compose.ui.graphics.vector.ImageVector
+import com.xuanthanhtnt.xtplayer.ui.theme.LocalIsTv
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -50,28 +67,97 @@ import com.xuanthanhtnt.xtplayer.ui.theme.XtColors
 import com.xuanthanhtnt.xtplayer.update.UpdateChecker
 import kotlinx.coroutines.launch
 
+/** Settings in groups (SettingsView.swift `SettingsGroup`): a page of sections, or one group in the TV menu's panel. */
+enum class SettingsGroup(val title: String, val icon: ImageVector) {
+    PICTURE("Hình ảnh", Icons.Filled.Tv),
+    PLAYBACK("Phát lại", Icons.Filled.PlayCircleFilled),
+    AUDIO("Âm thanh", Icons.AutoMirrored.Filled.VolumeUp),
+    SUBTITLES("Phụ đề", Icons.Filled.ClosedCaption),
+    LIBRARY("Thư viện", Icons.Filled.VideoLibrary),
+    SERVERS("Máy chủ", Icons.Filled.Dns),
+    DIAGNOSTICS("Nhật ký chẩn đoán", Icons.Filled.BugReport),
+    ONLINE_SUBTITLES("OpenSubtitles", Icons.Filled.Subtitles),
+    TRAKT("Trakt", Icons.Filled.Verified),
+    UPDATES("Cập nhật", Icons.Filled.SystemUpdate),
+    ABOUT("Giới thiệu", Icons.Filled.Info),
+}
+
 @Composable
 fun SettingsScreen() {
-    val settings = AppGraph.settings
     val dimens = LocalDimens.current
-    val actions = LocalAppActions.current
-    val dao = AppGraph.dao
-    val servers by remember { dao.serversFlow() }.collectAsState(initial = emptyList())
-    val folders by remember { dao.foldersFlow() }.collectAsState(initial = emptyList())
-    val scanning by AppGraph.scanner.isScanning.collectAsState()
-    val scanStatus by AppGraph.scanner.status.collectAsState()
-
     LazyColumn(
         Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = dimens.pagePadding, end = dimens.pagePadding, bottom = 40.dp),
     ) {
         item { PageTitle("Cài đặt", inset = false) }
+        SettingsGroup.entries.forEach { group ->
+            item(key = group.name) {
+                Column(
+                    Modifier
+                        .padding(top = 18.dp)
+                        .widthIn(max = 900.dp)
+                ) {
+                    Text(group.title, style = MaterialTheme.typography.titleMedium, color = XtColors.leaf, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(6.dp))
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .glassPanel(16.dp)
+                            .padding(horizontal = 14.dp, vertical = 8.dp)
+                    ) { SettingsGroupContent(group) }
+                    settingsFooter(group)?.let {
+                        Text(it, style = MaterialTheme.typography.bodySmall, color = XtColors.secondaryText, modifier = Modifier.padding(top = 6.dp, start = 4.dp))
+                    }
+                }
+            }
+        }
+    }
+}
 
-        section("Phát lại", "Giải mã phần cứng đổi ngay cho video đang phát; các mục khác áp dụng cho lần phát tiếp theo.") {
+/** One group's explanation under its rows. */
+@Composable
+fun settingsFooter(group: SettingsGroup): String? {
+    val dao = AppGraph.dao
+    return when (group) {
+        SettingsGroup.PICTURE -> "Giải mã phần cứng đổi ngay cho video đang phát."
+        SettingsGroup.PLAYBACK -> "Áp dụng cho lần phát tiếp theo."
+        SettingsGroup.AUDIO ->
+            "Tăng thoại: kênh giữa to hơn, kênh vòm và siêu trầm nhỏ lại (stereo: tách dải giọng nói). Ban đêm: nén dải động — " +
+                "tiếng nói nhỏ được nâng lên, tiếng nổ được giữ lại. Cân bằng âm lượng: dùng thẻ ReplayGain trong file để các album " +
+                "to nhỏ như nhau (giữ chênh lệch giữa các bài trong album). Khớp tần số (Android 14 trở lên): DAC USB chạy đúng " +
+                "tần số của file (44,1 / 96 / 192 kHz), bit-perfect khi DAC cho phép, thay vì hệ thống lấy mẫu lại thành 48 kHz. " +
+                "Các mục này đổi ngay cho nội dung đang phát. " +
+                "Bitstream chỉ có tác dụng khi ampli / TV qua HDMI nhận được định dạng đó; lúc bitstream, âm lượng chỉnh trên ampli " +
+                "và tăng thoại / ban đêm không áp dụng."
+        SettingsGroup.LIBRARY -> {
+            val folders by remember { dao.foldersFlow() }.collectAsState(initial = emptyList())
+            "Lấy khoá miễn phí tại themoviedb.org ▸ Settings ▸ API. ${folders.size} thư mục trong thư viện."
+        }
+        SettingsGroup.SERVERS -> {
+            val servers by remember { dao.serversFlow() }.collectAsState(initial = emptyList())
+            if (servers.isEmpty()) "Chưa có máy chủ — thêm ở mục Nguồn." else null
+        }
+        SettingsGroup.DIAGNOSTICS -> "Nếu XT-Player bị dừng đột ngột hoặc tiếng bị rè, gửi nhật ký để sửa lỗi."
+        SettingsGroup.ONLINE_SUBTITLES ->
+            "Lấy API key miễn phí tại opensubtitles.com ▸ Profile ▸ API Consumers. Đăng nhập tài khoản để được tải nhiều phụ đề hơn " +
+                "mỗi ngày. Tìm phụ đề trong trình phát ▸ bảng Phụ đề."
+        SettingsGroup.UPDATES -> "Bản cập nhật lấy từ GitHub Releases (${BuildConfig.UPDATE_REPOSITORY})."
+        SettingsGroup.SUBTITLES, SettingsGroup.TRAKT, SettingsGroup.ABOUT -> null
+    }
+}
+
+/** The rows of one group. */
+@Composable
+fun SettingsGroupContent(group: SettingsGroup) {
+    val settings = AppGraph.settings
+    val actions = LocalAppActions.current
+    val dao = AppGraph.dao
+    when (group) {
+        SettingsGroup.PICTURE -> {
             PrefSwitch(
                 "Giải mã phần cứng", settings.hardwareDecoding,
                 "Bật (khuyên dùng): dùng chip giải mã của máy — mượt, mát, giữ HDR / Dolby Vision. Tắt khi một tệp bị sọc, " +
-                    "xanh lá hay giật hình: dùng bộ giải mã phần mềm của Android. Đổi nhanh trong trình phát ▸ ⚙︎ ▸ Video.",
+                    "xanh lá hay giật hình: dùng bộ giải mã phần mềm của Android. Đổi nhanh trong trình phát ▸ Video.",
             )
             ChoiceRow(
                 "Khớp tần số quét", settings.frameRateMatching,
@@ -79,23 +165,15 @@ fun SettingsScreen() {
                 detail = "Android TV: đổi tần số quét của TV theo video (23.976 / 24 / 25 / 50 / 60 Hz) — hết giật hình khi máy quay ngang; " +
                     "Match Content còn chuyển TV sang 4K cho phim 4K khi hộp đang xuất 1080p.",
             )
+            PrefSwitch("Chế độ tunneled", settings.tunneling, "Một số Android TV đồng bộ hình / tiếng tốt hơn khi bitstream. Tắt nếu bị đen hình.")
+        }
+        SettingsGroup.PLAYBACK -> {
             ChoiceRow("Bộ đệm RAM", settings.cacheMegabytes, listOf(100, 200, 300, 500, 800, 1200).map { it to "$it MB" })
             PrefSwitch("Tự phát tập tiếp theo", settings.autoplayNext)
             ChoiceRow("Tua lùi", settings.skipBackSeconds, listOf(5, 10, 15, 30).map { it to "$it giây" })
             ChoiceRow("Tua tới", settings.skipForwardSeconds, listOf(10, 15, 30, 60).map { it to "$it giây" })
-            PrefSwitch("Chế độ tunneled", settings.tunneling, "Một số Android TV đồng bộ hình / tiếng tốt hơn khi bitstream. Tắt nếu bị đen hình.")
         }
-
-        section(
-            "Âm thanh",
-            "Tăng thoại: kênh giữa to hơn, kênh vòm và siêu trầm nhỏ lại (stereo: tách dải giọng nói). Ban đêm: nén dải động — " +
-                "tiếng nói nhỏ được nâng lên, tiếng nổ được giữ lại. Cân bằng âm lượng: dùng thẻ ReplayGain trong file để các album " +
-                "to nhỏ như nhau (giữ chênh lệch giữa các bài trong album). Khớp tần số (Android 14 trở lên): DAC USB chạy đúng " +
-                "tần số của file (44,1 / 96 / 192 kHz), bit-perfect khi DAC cho phép, thay vì hệ thống lấy mẫu lại thành 48 kHz. " +
-                "Các mục này đổi ngay cho nội dung đang phát. " +
-                "Bitstream chỉ có tác dụng khi ampli / TV qua HDMI nhận được định dạng đó; lúc bitstream, âm lượng chỉnh trên ampli " +
-                "và tăng thoại / ban đêm không áp dụng.",
-        ) {
+        SettingsGroup.AUDIO -> {
             PrefSwitch("Tăng thoại (nghe rõ lời nói)", settings.dialogBoost)
             PrefSwitch("Chế độ ban đêm (nén dải động)", settings.nightMode)
             PrefSwitch("Cân bằng âm lượng nhạc (ReplayGain)", settings.volumeLeveling)
@@ -103,18 +181,18 @@ fun SettingsScreen() {
                 PrefSwitch("Khớp tần số lấy mẫu với DAC USB", settings.matchSampleRate)
             }
             PrefSwitch("Bitstream TrueHD / DTS-HD / E-AC3 qua HDMI", settings.audioPassthrough)
-            AudioLogButton()
             PrefText("Ngôn ngữ âm thanh ưu tiên (vd: vie,eng)", settings.audioLanguages)
         }
-
-        section("Phụ đề", null) {
+        SettingsGroup.SUBTITLES -> {
             PrefText("Ngôn ngữ phụ đề ưu tiên", settings.subtitleLanguages)
             ChoiceRow("Cỡ chữ", settings.subtitleScale, listOf(0.8f, 0.9f, 1f, 1.15f, 1.3f, 1.5f).map { it to "${(it * 100).toInt()}%" })
             ChoiceRow("Vị trí", settings.subtitlePosition, listOf(100 to "Sát đáy", 94 to "Cao hơn", 60 to "Giữa màn hình"))
             PrefSwitch("Nền tối sau chữ", settings.subtitleBackground)
         }
-
-        section("Thư viện", "Lấy khoá miễn phí tại themoviedb.org ▸ Settings ▸ API. ${folders.size} thư mục trong thư viện.") {
+        SettingsGroup.LIBRARY -> {
+            val folders by remember { dao.foldersFlow() }.collectAsState(initial = emptyList())
+            val scanning by AppGraph.scanner.isScanning.collectAsState()
+            val scanStatus by AppGraph.scanner.status.collectAsState()
             SecretField("TMDb API key (v3) hoặc Read Access Token (v4)", "tmdb")
             ChoiceRow("Ngôn ngữ thông tin phim", settings.metadataLanguage, listOf("vi-VN" to "Tiếng Việt", "en-US" to "English"))
             Button(
@@ -123,8 +201,8 @@ fun SettingsScreen() {
                 modifier = Modifier.padding(vertical = 6.dp),
             ) { Text(if (scanning) scanStatus.ifEmpty { "Đang quét…" } else "Quét lại toàn bộ thư viện") }
         }
-
-        section("Máy chủ", if (servers.isEmpty()) "Chưa có máy chủ — thêm ở mục Nguồn." else null) {
+        SettingsGroup.SERVERS -> {
+            val servers by remember { dao.serversFlow() }.collectAsState(initial = emptyList())
             servers.forEach { server ->
                 Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
@@ -137,24 +215,20 @@ fun SettingsScreen() {
                     }
                 }
             }
+            if (servers.isEmpty()) Text("Chưa có máy chủ.", style = MaterialTheme.typography.bodyMedium, color = XtColors.secondaryText)
         }
-
-        section(
-            "Phụ đề trực tuyến (OpenSubtitles)",
-            "Lấy API key miễn phí tại opensubtitles.com ▸ Profile ▸ API Consumers. Đăng nhập tài khoản để được tải nhiều phụ đề hơn mỗi ngày. Tìm phụ đề trong trình phát ▸ bảng Phụ đề.",
-        ) {
+        SettingsGroup.DIAGNOSTICS -> {
+            CrashSection()
+            AudioLogButton()
+        }
+        SettingsGroup.ONLINE_SUBTITLES -> {
             SecretField("API key", "opensubtitles")
             PrefText("Tài khoản (không bắt buộc)", settings.openSubtitlesUser)
             SecretField("Mật khẩu", "opensubtitles.password")
         }
-
-        section("Trakt", null) { TraktSection() }
-
-        section("Cập nhật", "Bản cập nhật lấy từ GitHub Releases (${BuildConfig.UPDATE_REPOSITORY}).") { UpdateSection() }
-
-        section("Nhật ký lỗi", "Nếu XT-Player bị dừng đột ngột, gửi nhật ký này để sửa lỗi.") { CrashSection() }
-
-        section("Giới thiệu", null) {
+        SettingsGroup.TRAKT -> TraktSection()
+        SettingsGroup.UPDATES -> UpdateSection()
+        SettingsGroup.ABOUT -> {
             InfoRow("Phiên bản", BuildConfig.VERSION_NAME)
             InfoRow("Lõi phát", "Media3 ExoPlayer 1.8 · FFmpeg (Jellyfin) · MediaCodec")
             InfoRow("SMB", "smbj (SMB2 / SMB3)")
@@ -162,33 +236,35 @@ fun SettingsScreen() {
     }
 }
 
-private fun androidx.compose.foundation.lazy.LazyListScope.section(title: String, footer: String?, content: @Composable () -> Unit) {
-    item {
-        Column(
-            Modifier
-                .padding(top = 18.dp)
-                .widthIn(max = 900.dp)
-        ) {
-            Text(title, style = MaterialTheme.typography.titleMedium, color = XtColors.leaf, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(6.dp))
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .glassPanel(16.dp)
-                    .padding(horizontal = 14.dp, vertical = 8.dp)
-            ) { content() }
-            if (footer != null) {
-                Text(footer, style = MaterialTheme.typography.bodySmall, color = XtColors.secondaryText, modifier = Modifier.padding(top = 6.dp, start = 4.dp))
-            }
-        }
-    }
-}
-
-/** A setting with a few values: OK / tap cycles to the next one (works the same with a TV remote and touch). */
+/**
+ * A setting with a few values: OK / tap cycles to the next one; on TV every value is listed in place with a tick
+ * on the one in use (SettingsView.swift `choice`: no pop-up, no new page).
+ */
 @Composable
 private fun <T> ChoiceRow(label: String, pref: Pref<T>, options: List<Pair<T, String>>, detail: String? = null) {
     val value by pref.collect()
     val currentIndex = options.indexOfFirst { it.first == value }
+    if (LocalIsTv.current) {
+        Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+            Text(label, style = MaterialTheme.typography.bodyLarge)
+            if (detail != null) Text(detail, style = MaterialTheme.typography.bodySmall, color = XtColors.secondaryText)
+            options.forEach { (option, title) ->
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .focusClickable(RoundedCornerShape(10.dp), focusScale = 1.01f) { pref.value = option }
+                        .padding(horizontal = 8.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(Modifier.width(26.dp)) {
+                        if (option == value) Icon(Icons.Filled.Check, "Đang dùng", tint = XtColors.leaf, modifier = Modifier.size(18.dp))
+                    }
+                    Text(title, style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+        }
+        return
+    }
     Row(
         Modifier
             .fillMaxWidth()

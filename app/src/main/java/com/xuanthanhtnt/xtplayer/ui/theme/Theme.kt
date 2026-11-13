@@ -46,7 +46,8 @@ data class Dimens(
 // The Apple app's Theme / FeaturedHero sizes: iOS (phone), macOS (tablet), tvOS (TV, 1920 pt ≈ 960 dp).
 val PhoneDimens = Dimens(24.dp, 140.dp, 280.dp, 20.dp, 480.dp, 36, 76.dp, 16.dp)
 val TabletDimens = Dimens(24.dp, 140.dp, 280.dp, 20.dp, 520.dp, 46, 76.dp, 16.dp)
-val TvDimens = Dimens(40.dp, 125.dp, 220.dp, 14.dp, 430.dp, 36, 65.dp, 24.dp)
+// TV (Apple v0.3.4): sized so a shelf shows six or seven posters, not four — the screen looked zoomed in.
+val TvDimens = Dimens(35.dp, 95.dp, 170.dp, 11.dp, 320.dp, 28, 58.dp, 22.dp)
 
 /** True on Android TV / Google TV boxes: D-pad navigation, no touch, larger focus effects. */
 val LocalIsTv = staticCompositionLocalOf { false }
@@ -79,7 +80,8 @@ private val scheme = darkColorScheme(
 
 @Composable
 fun XtTheme(isTv: Boolean, isWide: Boolean, content: @Composable () -> Unit) {
-    val base = Typography()
+    // TV text one size smaller (Apple TV `.dynamicTypeSize(.xSmall)`).
+    val base = if (isTv) Typography().scaled(0.88f) else Typography()
     val typography = base.copy(
         headlineLarge = base.headlineLarge.copy(fontWeight = FontWeight.Bold),
         headlineMedium = base.headlineMedium.copy(fontWeight = FontWeight.Bold),
@@ -100,5 +102,15 @@ fun XtTheme(isTv: Boolean, isWide: Boolean, content: @Composable () -> Unit) {
         }
     }
 }
+
+private fun TextStyle.scaled(factor: Float): TextStyle = copy(fontSize = fontSize * factor, lineHeight = lineHeight * factor)
+
+private fun Typography.scaled(factor: Float) = Typography(
+    displayLarge = displayLarge.scaled(factor), displayMedium = displayMedium.scaled(factor), displaySmall = displaySmall.scaled(factor),
+    headlineLarge = headlineLarge.scaled(factor), headlineMedium = headlineMedium.scaled(factor), headlineSmall = headlineSmall.scaled(factor),
+    titleLarge = titleLarge.scaled(factor), titleMedium = titleMedium.scaled(factor), titleSmall = titleSmall.scaled(factor),
+    bodyLarge = bodyLarge.scaled(factor), bodyMedium = bodyMedium.scaled(factor), bodySmall = bodySmall.scaled(factor),
+    labelLarge = labelLarge.scaled(factor), labelMedium = labelMedium.scaled(factor), labelSmall = labelSmall.scaled(factor),
+)
 
 val HeroTitleStyle: (Int) -> TextStyle = { size -> TextStyle(fontSize = size.sp, fontWeight = FontWeight.Black, lineHeight = (size * 1.1).sp) }
