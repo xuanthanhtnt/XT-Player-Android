@@ -64,6 +64,7 @@ object MusicPlayer {
     private val repeatFlow = MutableStateFlow(RepeatMode.OFF)
     private val nowPlayingFlow = MutableStateFlow(false)
     private val playingFlow = MutableStateFlow(false)
+    private val pausedFlow = MutableStateFlow(false)
     private val positionFlow = MutableStateFlow(0.0)
     private val durationFlow = MutableStateFlow(0.0)
     private val signalFlow = MutableStateFlow(AudioPathInput())
@@ -74,6 +75,8 @@ object MusicPlayer {
     val repeatMode: StateFlow<RepeatMode> = repeatFlow
     val showsNowPlaying: StateFlow<Boolean> = nowPlayingFlow
     val isPlaying: StateFlow<Boolean> = playingFlow
+    /** Paused by the listener (or played to the end), as opposed to loading between tracks while meant to play. */
+    val isPaused: StateFlow<Boolean> = pausedFlow
     val position: StateFlow<Double> = positionFlow
     val duration: StateFlow<Double> = durationFlow
     val signal: StateFlow<AudioPathInput> = signalFlow
@@ -279,6 +282,7 @@ object MusicPlayer {
         indexFlow.value = 0
         nowPlayingFlow.value = false
         playingFlow.value = false
+        pausedFlow.value = false
         formats.clear()
         entryKey = null
     }
@@ -358,6 +362,7 @@ object MusicPlayer {
 
         override fun onPlaybackStateChanged(playbackState: Int) {
             if (playbackState == Player.STATE_ENDED) finish(entryKey, trackDuration)
+            updatePaused()
         }
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -367,6 +372,7 @@ object MusicPlayer {
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
             // Paused from the notification, a headset or a phone call: keep the place.
             if (!playWhenReady) saveProgress()
+            updatePaused()
         }
 
         override fun onVolumeChanged(volume: Float) = updateSignal()
@@ -415,6 +421,11 @@ object MusicPlayer {
         override fun onAudioCodecError(eventTime: AnalyticsListener.EventTime, audioCodecError: Exception) {
             log("decoder error: ${audioCodecError.message ?: audioCodecError}")
         }
+    }
+
+    private fun updatePaused() {
+        val exo = player
+        pausedFlow.value = exo != null && (!exo.playWhenReady || exo.playbackState == Player.STATE_ENDED)
     }
 
     private fun log(message: String) = com.xuanthanhtnt.xtplayer.core.AppLog.append("[audio] $message")
