@@ -255,6 +255,7 @@ class LibraryScanner {
             val data = runCatching { fs.download(cover.path) }.getOrNull() ?: continue
             if (data.isEmpty()) continue
             if (runCatching { output.writeBytes(data) }.isFailure) continue
+            ThumbnailStore.announce()
             dao.item(key)?.let { dao.upsertItem(it.copy(posterPath = reference, backdropPath = reference)) }
         }
     }
@@ -271,49 +272,88 @@ class LibraryScanner {
     /**
      * Items without TMDb artwork (home videos, concerts, unmatched titles) and Continue Watching entries
      * without a picture get a frame of their video, as Infuse does. Runs after each scan and once at launch.
+     *
+     * [firstPass]: only what needs no Trakt answer — albums, music videos, and pictures made here before that are
+     * gone — so the home page fills in while Trakt is still being asked (LibraryScanner.swift `firstPass`).
      */
-    suspend fun generateMissingArtwork(): Unit = withContext(Dispatchers.IO) {
-        if (!artworkLock.tryLock()) return@withContext
+    suspend fun generateMissingArtwork(firstPass: Boolean = false): Unit = withContext(Dispatchers.IO) {
+        // The first pass gives way to one already running; the full pass waits its turn.
+        if (firstPass) {
+            if (!artworkLock.tryLock()) return@withContext
+        } else {
+            artworkLock.lock()
+        }
         try {
-            val items = dao.items().filter { !ThumbnailStore.isUsable(it.posterPath) && !ThumbnailStore.isUsable(it.backdropPath) }
+            // Newest first: the home page shows those.
+            val items = dao.items()
+                .filter { !ThumbnailStore.isUsable(it.posterPath) && !ThumbnailStore.isUsable(it.backdropPath) }
+                .filter {
+                    !firstPass || it.kind == LibraryKind.ALBUM || it.kind == LibraryKind.MUSIC_VIDEO ||
+                        ThumbnailStore.isLocal(it.posterPath ?: it.backdropPath)
+                }
+                .sortedByDescending { it.addedAt }
             val filesByItem = dao.files().groupBy { it.itemKey }
             val servers = dao.servers().associate { it.id to it.credentials } +
                 (com.xuanthanhtnt.xtplayer.network.LocalStorage.SERVER_ID to com.xuanthanhtnt.xtplayer.network.LocalStorage.credentials)
             val previous = statusText.value
+            // A server that cannot be read right now (asleep, network not back after a wake) is not asked again in
+            // this pass: every file would wait for the timeout and then be taken for a file without a picture.
+            val unreachable = mutableSetOf<String>()
 
             items.forEachIndexed { index, item ->
                 val files = filesByItem[item.key].orEmpty().sortedWith(
                     compareBy<LibraryFile>({ it.season ?: 0 }, { it.episode ?: 0 }, { it.path })
                 )
                 val file = files.firstOrNull() ?: return@forEachIndexed
-                val server = file.serverID?.let { servers[it] } ?: return@forEachIndexed
+                val serverID = file.serverID ?: return@forEachIndexed
+                if (serverID in unreachable) return@forEachIndexed
+                val server = servers[serverID] ?: return@forEachIndexed
                 val reference = ThumbnailStore.reference(file.key)
                 val output = ThumbnailStore.file(reference) ?: return@forEachIndexed
                 if (!output.exists()) {
+                    // Tracks without a cover and broken files are not tried again at every launch.
+                    if (ThumbnailStore.recentlyFailed(file.key)) return@forEachIndexed
                     statusText.value = "Tạo ảnh bìa ${index + 1}/${items.size}…"
                     ServerRegistry.register(server)
                     val location = RemoteFileSystems.playbackUri(server, file.path).toString()
-                    if (item.kind == LibraryKind.ALBUM) {
-                        // An album's picture is the cover embedded in its first track.
-                        if (!FrameGrabber.grabEmbeddedPicture(location, output)) return@forEachIndexed
+                    // An album's picture is the cover embedded in its first track.
+                    val result = if (item.kind == LibraryKind.ALBUM) {
+                        FrameGrabber.grabEmbeddedPicture(location, output)
                     } else {
-                        val probe = FrameGrabber.grab(location, output) ?: return@forEachIndexed
-                        MediaLibrary.learn(file.key, probe.resolutionLabel, probe.duration)
+                        FrameGrabber.grabFrame(location, output)
+                    }
+                    when (result) {
+                        is FrameGrabber.Grab.Done -> if (item.kind != LibraryKind.ALBUM) {
+                            MediaLibrary.learn(file.key, result.probe.resolutionLabel, result.probe.duration)
+                        }
+                        FrameGrabber.Grab.NoPicture -> {
+                            ThumbnailStore.markFailed(file.key)
+                            return@forEachIndexed
+                        }
+                        FrameGrabber.Grab.Unavailable -> {
+                            unreachable += serverID
+                            return@forEachIndexed
+                        }
                     }
                 }
                 dao.item(item.key)?.let { dao.upsertItem(it.copy(posterPath = reference, backdropPath = reference)) }
                 for (f in files) {
                     val entry = dao.entry(f.key)
-                    if (entry != null && entry.artworkPath == null) dao.upsertEntry(entry.copy(artworkPath = reference))
+                    if (entry != null && !ThumbnailStore.isUsable(entry.artworkPath)) dao.upsertEntry(entry.copy(artworkPath = reference))
                 }
             }
+            if (firstPass) {
+                statusText.value = previous
+                return@withContext
+            }
 
-            // Continue Watching entries that are not library files: opened from a share, from WebDAV or from this device.
-            for (entry in dao.entries().filter { it.artworkPath == null }) {
+            // Continue Watching entries that are not library files (opened from a share, from WebDAV or from this
+            // device), and ones whose picture is gone.
+            for (entry in dao.entries().filter { !ThumbnailStore.isUsable(it.artworkPath) }) {
                 val source = grabSource(entry, servers) ?: continue
                 val reference = ThumbnailStore.reference(entry.key)
                 val output = ThumbnailStore.file(reference) ?: continue
-                if (!output.exists() && FrameGrabber.grab(source, output) == null) continue
+                if (!output.exists() && FrameGrabber.grabFrame(source, output) !is FrameGrabber.Grab.Done) continue
                 dao.entry(entry.key)?.let { dao.upsertEntry(it.copy(artworkPath = reference)) }
             }
             statusText.value = previous

@@ -83,7 +83,10 @@ object AppGraph {
         watchNetwork(app)
         scope.launch(Dispatchers.IO) {
             ServerRegistry.preload()
+            // Pictures that need no Trakt answer (and ones the system deleted) are made alongside it.
+            val firstPictures = launch { scanner.generateMissingArtwork(firstPass = true) }
             trakt.sync()
+            firstPictures.join()
             scanner.generateMissingArtwork()
             while (true) {
                 kotlinx.coroutines.delay(900_000)

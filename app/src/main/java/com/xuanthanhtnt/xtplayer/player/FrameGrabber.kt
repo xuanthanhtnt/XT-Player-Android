@@ -36,13 +36,27 @@ object FrameGrabber {
     /** Two at a time: decoding 4K HEVC frames is heavy on a TV box. */
     private val permits = Semaphore(2)
 
-    suspend fun grab(location: String, output: File): Probe? = permits.withPermit {
-        withContext(Dispatchers.IO) { runCatching { grabBlocking(location, output) }.getOrNull() }
+    /**
+     * What a grab came to (FrameGrabber.swift `Failure`): a picture, a file with no picture to show (worth
+     * remembering), or a file that could not be read right now (server asleep, network not back after a wake,
+     * storage full) and is tried again later.
+     */
+    sealed interface Grab {
+        data class Done(val probe: Probe) : Grab
+        data object NoPicture : Grab
+        data object Unavailable : Grab
+    }
+
+    suspend fun grab(location: String, output: File): Probe? = (grabFrame(location, output) as? Grab.Done)?.probe
+
+    /** A frame of the video, 20 % in. */
+    suspend fun grabFrame(location: String, output: File): Grab = permits.withPermit {
+        withContext(Dispatchers.IO) { runCatching { grabBlocking(location, output) }.getOrDefault(Grab.Unavailable) }
     }
 
     /** An album's picture: the cover embedded in its first track (ID3 APIC, FLAC PICTURE, MP4 covr). */
-    suspend fun grabEmbeddedPicture(location: String, output: File): Boolean = permits.withPermit {
-        withContext(Dispatchers.IO) { runCatching { embeddedPictureBlocking(location, output) }.getOrDefault(false) }
+    suspend fun grabEmbeddedPicture(location: String, output: File): Grab = permits.withPermit {
+        withContext(Dispatchers.IO) { runCatching { embeddedPictureBlocking(location, output) }.getOrDefault(Grab.Unavailable) }
     }
 
     /** A retriever reading [location] (NAS files through [SmbFileReader]); the reader must be released with it. */
@@ -86,8 +100,8 @@ object FrameGrabber {
         }
     }
 
-    private fun grabBlocking(location: String, output: File): Probe? {
-        val source = open(location) ?: return null
+    private fun grabBlocking(location: String, output: File): Grab {
+        val source = open(location) ?: return Grab.Unavailable
         val retriever = source.retriever
         try {
             val durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
@@ -102,28 +116,28 @@ object FrameGrabber {
                 retriever.getScaledFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 640, 360)
             } else {
                 retriever.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
-            }) ?: retriever.frameAtTime ?: return null
+            }) ?: retriever.frameAtTime ?: return Grab.NoPicture
 
-            save(frame, output, 640)
-            return Probe(durationMs / 1000.0, width, height)
+            if (!save(frame, output, 640)) return Grab.Unavailable
+            return Grab.Done(Probe(durationMs / 1000.0, width, height))
         } finally {
             source.close()
         }
     }
 
-    private fun embeddedPictureBlocking(location: String, output: File): Boolean {
-        val source = open(location) ?: return false
+    private fun embeddedPictureBlocking(location: String, output: File): Grab {
+        val source = open(location) ?: return Grab.Unavailable
         try {
-            val bytes = source.retriever.embeddedPicture ?: return false
-            val picture = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return false
-            save(picture, output, 600)
-            return true
+            val bytes = source.retriever.embeddedPicture ?: return Grab.NoPicture
+            val picture = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return Grab.NoPicture
+            return if (save(picture, output, 600)) Grab.Done(Probe(0.0, picture.width, picture.height)) else Grab.Unavailable
         } finally {
             source.close()
         }
     }
 
-    private fun save(bitmap: Bitmap, output: File, maxWidth: Int) {
+    /** Writes the JPEG and tells waiting artwork it exists. False when it could not be written (storage full). */
+    private fun save(bitmap: Bitmap, output: File, maxWidth: Int): Boolean {
         val scaled = if (bitmap.width > maxWidth) {
             Bitmap.createScaledBitmap(bitmap, maxWidth, (bitmap.height * maxWidth.toFloat() / bitmap.width).roundToInt().coerceAtLeast(1), true)
         } else {
@@ -131,7 +145,12 @@ object FrameGrabber {
         }
         output.parentFile?.mkdirs()
         val temp = File(output.parentFile, output.name + ".tmp")
-        temp.outputStream().use { scaled.compress(Bitmap.CompressFormat.JPEG, 82, it) }
-        temp.renameTo(output)
+        val written = runCatching { temp.outputStream().use { scaled.compress(Bitmap.CompressFormat.JPEG, 82, it) } }.getOrDefault(false)
+        if (!written || !temp.renameTo(output)) {
+            temp.delete()
+            return false
+        }
+        com.xuanthanhtnt.xtplayer.metadata.ThumbnailStore.announce()
+        return true
     }
 }

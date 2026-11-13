@@ -25,6 +25,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -158,6 +159,13 @@ fun PlayerScreen(
     val upNext by controller.upNextCountdown.collectAsState()
     val subtitleScale by settings.subtitleScale.collect()
     val subtitlePosition by settings.subtitlePosition.collect()
+    // The screen stays on while a video plays; paused, finished or music, the normal sleep timeout applies again.
+    val view = androidx.compose.ui.platform.LocalView.current
+    val isMusic = item.fileName.substringAfterLast('.', "").lowercase() in com.xuanthanhtnt.xtplayer.metadata.FilenameParser.audioExtensions
+    DisposableEffect(view, state, isMusic) {
+        view.keepScreenOn = state == PlaybackState.Playing && !isMusic
+        onDispose { view.keepScreenOn = false }
+    }
     val subtitleBackground by settings.subtitleBackground.collect()
 
     var controlsVisible by remember { mutableStateOf(true) }
@@ -195,7 +203,8 @@ fun PlayerScreen(
     // Controls fade out while playing, as in Infuse.
     LaunchedEffect(controlsVisible, interaction, state, panel) {
         if (controlsVisible && panel == null && state == PlaybackState.Playing) {
-            delay(4500)
+            // TV: 8 s, counted again at every press of the remote (PlayerScreen.swift autoHideDelay).
+            delay(if (isTv) 8000 else 4500)
             controlsVisible = false
         }
     }
@@ -236,6 +245,8 @@ fun PlayerScreen(
             .onPreviewKeyEvent { event ->
                 // While casting, the remote's keys drive the casting screen's buttons.
                 if (event.type != KeyEventType.KeyDown || remote != null) return@onPreviewKeyEvent false
+                // Moving around the controls counts as using them: the bar stays up while you do.
+                if (controlsVisible) poke()
                 when (event.nativeKeyEvent.keyCode) {
                     KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
                         engine.togglePause(); showControls(); true
@@ -394,7 +405,7 @@ fun PlayerScreen(
             }
 
             panel?.let { current ->
-                PanelSheet(current, onSelect = { panel = it }, onDismiss = { panel = null }) {
+                PanelSheet(current, isTv, onSelect = { panel = it }, onDismiss = { panel = null }) {
                     when (current) {
                         PlayerPanel.AUDIO -> audioPanel(engine)
                         PlayerPanel.SUBTITLES -> subtitlePanel(engine)
@@ -550,7 +561,10 @@ private fun ControlsOverlay(
                 }
                 Row(Modifier.align(Alignment.CenterEnd).padding(end = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                     if (onCast != null) BarButton(Icons.Filled.Cast, "Phát trên TV (Cast)", 22.dp) { onInteraction(); onCast() }
-                    BarButton(Icons.Filled.Settings, "Âm thanh, phụ đề, video, thông tin", 22.dp) { onInteraction(); onPanel(PlayerPanel.AUDIO) }
+                    // TV: the four panels have their own buttons under the bar.
+                    if (!isTv) {
+                        BarButton(Icons.Filled.Settings, "Âm thanh, phụ đề, video, thông tin", 22.dp) { onInteraction(); onPanel(PlayerPanel.AUDIO) }
+                    }
                     if (onPip != null) BarButton(Icons.Filled.PictureInPictureAlt, "Cửa sổ nổi", 22.dp) { onPip() }
                     BarButton(Icons.Filled.AspectRatio, fit.label, 22.dp) {
                         onInteraction()
@@ -578,6 +592,11 @@ private fun ControlsOverlay(
                     textAlign = TextAlign.End,
                     modifier = Modifier.width(72.dp),
                 )
+            }
+            if (isTv) {
+                Row(Modifier.padding(start = 14.dp, top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    PlayerPanel.entries.forEach { target -> PanelTab(target.title, selected = false) { onInteraction(); onPanel(target) } }
+                }
             }
         }
     }
@@ -910,12 +929,18 @@ private fun ErrorCard(message: String, onRetry: () -> Unit, onClose: () -> Unit,
 @Composable
 private fun PanelSheet(
     current: PlayerPanel,
+    isTv: Boolean,
     onSelect: (PlayerPanel) -> Unit,
     onDismiss: () -> Unit,
     content: androidx.compose.foundation.lazy.LazyListScope.() -> Unit,
 ) {
     val firstTab = remember { FocusRequester() }
-    LaunchedEffect(Unit) { runCatching { firstTab.requestFocus() } }
+    val contentFocus = remember { FocusRequester() }
+    LaunchedEffect(current) {
+        // TV: the panel opens on its first row (its buttons sit under the bar); elsewhere on its tab.
+        if (isTv) delay(60)
+        runCatching { if (isTv) contentFocus.requestFocus() else firstTab.requestFocus() }
+    }
     Box(Modifier.fillMaxSize()) {
         Box(
             Modifier
@@ -934,27 +959,39 @@ private fun PanelSheet(
                 .border(1.dp, XtColors.glassBorder, RoundedCornerShape(22.dp))
                 .padding(vertical = 14.dp)
         ) {
-            LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp),
-            ) {
-                items(PlayerPanel.entries.toList()) { tab ->
-                    PanelTab(tab.title, selected = tab == current, modifier = if (tab == current) Modifier.focusRequester(firstTab) else Modifier) {
-                        onSelect(tab)
+            if (isTv) {
+                // The same four buttons sit right under the bar on TV: the panel only needs its name.
+                Text(
+                    current.title,
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    color = Color.White,
+                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 4.dp),
+                )
+            } else {
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp),
+                ) {
+                    items(PlayerPanel.entries.toList()) { tab ->
+                        PanelTab(tab.title, selected = tab == current, modifier = if (tab == current) Modifier.focusRequester(firstTab) else Modifier) {
+                            onSelect(tab)
+                        }
                     }
                 }
             }
             Spacer(Modifier.height(10.dp))
             HorizontalDivider(color = XtColors.glassBorder)
-            if (current == PlayerPanel.INFO) {
-                InfoPanelContent()
-            } else {
-                LazyColumn(
-                    Modifier.fillMaxSize(),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                    content = content,
-                )
+            Box(Modifier.focusRequester(contentFocus).focusGroup()) {
+                if (current == PlayerPanel.INFO) {
+                    InfoPanelContent()
+                } else {
+                    LazyColumn(
+                        Modifier.fillMaxSize(),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                        content = content,
+                    )
+                }
             }
         }
     }
@@ -967,6 +1004,8 @@ private fun PanelTab(title: String, selected: Boolean, modifier: Modifier = Modi
     Text(
         title,
         style = MaterialTheme.typography.labelLarge,
+        maxLines = 1,
+        softWrap = false,
         color = if (selected || focused) Color.Black else Color.White,
         modifier = modifier
             .clip(CircleShape)
@@ -1277,7 +1316,16 @@ private fun InfoPanelContent() {
             if (value.isEmpty()) {
                 Text(label, color = XtColors.leaf, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 14.dp, bottom = 4.dp))
             } else {
-                Row(Modifier.fillMaxWidth().focusable().padding(vertical = 3.dp)) {
+                // TV scrolls by moving the focus: read-only rows take it, with a light highlight.
+                val rowFocus = remember { MutableInteractionSource() }
+                val rowFocused by rowFocus.collectIsFocusedAsState()
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .background(if (rowFocused) Color.White.copy(alpha = 0.14f) else Color.Transparent, RoundedCornerShape(8.dp))
+                        .focusable(interactionSource = rowFocus)
+                        .padding(horizontal = 6.dp, vertical = 3.dp)
+                ) {
                     Text(label, color = XtColors.secondaryText, style = MaterialTheme.typography.bodySmall, modifier = Modifier.width(120.dp))
                     Text(value, color = Color.White, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
                 }

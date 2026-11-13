@@ -93,6 +93,7 @@ object MusicPlayer {
     private val formats = mutableMapOf<String, Format>()
     private var outputSampleRate = 0
     private var ticker: Job? = null
+    private var lastRepair = 0L
     private var settingsJob: Job? = null
     private val night = NightCompressor()
     private val replayGain = GainHolder()
@@ -452,6 +453,28 @@ object MusicPlayer {
         val length = exo.duration
         durationFlow.value = if (length == C.TIME_UNSET || length <= 0) 0.0 else length / 1000.0
         if (durationFlow.value > 0) trackDuration = durationFlow.value
+        repairSignal(exo)
+    }
+
+    /**
+     * The music plays but its format never arrived ("Đang mở…" in place of the quality): read it again from the
+     * player 1.5 s in, at most every 2 s, and log it (MPVPlayerEngine.swift `repairAudioSignal`).
+     */
+    private fun repairSignal(exo: ExoPlayer) {
+        val signal = signalFlow.value
+        if (!exo.isPlaying || positionFlow.value < 1.5 || (signal.codec.isNotEmpty() && signal.sampleRate > 0)) return
+        val now = System.currentTimeMillis()
+        if (now - lastRepair < 2000) return
+        lastRepair = now
+        val playing = current ?: return
+        val format = exo.audioFormat ?: return
+        log(
+            "audio info read again: codec ${PlayerEngine.codecName(format)}, ${format.sampleRate} Hz " +
+                "(was ${signal.codec.ifEmpty { "missing" }}, ${signal.sampleRate} Hz)",
+        )
+        formats[playing.id] = format
+        updateSignal()
+        learnQuality(playing.id, format)
     }
 
     private fun register(item: PlaybackItem) {

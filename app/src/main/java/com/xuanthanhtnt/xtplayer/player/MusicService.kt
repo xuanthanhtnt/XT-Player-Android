@@ -27,7 +27,10 @@ class MusicService : MediaSessionService() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         // Its own id: the video player has a session of its own at the same time.
-        session = MediaSession.Builder(this, player).setId("xtplayer-music").setSessionActivity(open).build().also(::addSession)
+        session = MediaSession.Builder(this, player).setId("xtplayer-music").setSessionActivity(open)
+            // Controllers extrapolate the position from the rate: only jumps (seek, track change) are sent.
+            .setPeriodicPositionUpdateEnabled(false)
+            .build().also(::addSession)
         instance = this
     }
 

@@ -35,6 +35,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -142,18 +143,25 @@ fun ArtworkImage(
     contentScale: ContentScale = ContentScale.Crop,
 ) {
     val model = TmdbClient.imageModel(path, size)
+    // A local picture that is not made yet shows the moment it is written (ThumbnailStore.announce); Coil does
+    // not keep failures, so a new request finds the file.
+    val written by com.xuanthanhtnt.xtplayer.metadata.ThumbnailStore.written.collectAsState()
+    val missing = com.xuanthanhtnt.xtplayer.metadata.ThumbnailStore.isLocal(path) &&
+        remember(path, written) { (model as? java.io.File)?.exists() != true }
     Box(modifier) {
         if (model == null) {
             Placeholder(placeholderIcon)
         } else {
-            SubcomposeAsyncImage(
-                model = model,
-                contentDescription = null,
-                contentScale = contentScale,
-                modifier = Modifier.fillMaxSize(),
-                loading = { Placeholder(placeholderIcon) },
-                error = { Placeholder(placeholderIcon) },
-            )
+            androidx.compose.runtime.key(path, if (missing) written else -1L) {
+                SubcomposeAsyncImage(
+                    model = model,
+                    contentDescription = null,
+                    contentScale = contentScale,
+                    modifier = Modifier.fillMaxSize(),
+                    loading = { Placeholder(placeholderIcon) },
+                    error = { Placeholder(placeholderIcon) },
+                )
+            }
         }
     }
 }
